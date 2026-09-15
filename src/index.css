@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", sans-serif;
+}
+
+/* Custom Neo-Brutalist utilities */
+.font-chunky {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+
+.shadow-neo {
+  box-shadow: 3px 3px 0px #0F172A;
+}
+
+.shadow-neo-lg {
+  box-shadow: 4px 5px 0px #0F172A;
+}
+
+.shadow-neo-sm {
+  box-shadow: 1.5px 2px 0px #0F172A;
+}
+
+.active-shadow-neo {
+  transition: all 0.1s ease-in-out;
+}
+
+.active-shadow-neo:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0px #0F172A;
+}
+
+/* Hide scrollbar but keep functional */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
