@@ -1,5 +1,6 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { Worker, MasterWorker } from '../types';
+import { DatakuProjectWeek } from './projectWeekService';
 
 export interface DatakuWorker {
   id: string;
@@ -17,12 +18,12 @@ export interface DatakuWorker {
 export interface DatakuWeekWorker {
   id: string;
   project_id: string;
-  week_id?: string | null;
+  week_id: string;
   worker_id: string;
   job_type?: string | null;
   daily_rate: number;
   work_days: number;
-  total_wage: number;
+  total_wage?: number;
   payment_status: string;
   notes?: string | null;
   created_at?: string;
@@ -42,6 +43,28 @@ export interface DatakuWorkerPayment {
   receipt_attachment_id?: string | null;
   created_at?: string;
   updated_at?: string;
+}
+
+/**
+ * Helper to map UI payment status to DB payment_status enum
+ */
+export function mapPaymentStatusToDB(status?: string): 'unpaid' | 'partial' | 'paid' {
+  if (!status) return 'unpaid';
+  const s = status.trim().toUpperCase();
+  if (s === 'LUNAS' || s === 'PAID') return 'paid';
+  if (s === 'SEBAGIAN' || s === 'PARTIAL') return 'partial';
+  return 'unpaid';
+}
+
+/**
+ * Helper to map DB payment_status to UI status string
+ */
+export function mapPaymentStatusFromDB(status?: string): 'BELUM_DIBAYAR' | 'SEBAGIAN' | 'LUNAS' {
+  if (!status) return 'BELUM_DIBAYAR';
+  const s = status.trim().toLowerCase();
+  if (s === 'paid' || s === 'lunas') return 'LUNAS';
+  if (s === 'partial' || s === 'sebagian') return 'SEBAGIAN';
+  return 'BELUM_DIBAYAR';
 }
 
 export const workerService = {
@@ -175,7 +198,7 @@ export const workerService = {
 
   async assignWorkerToWeek(data: {
     project_id: string;
-    week_id?: string | null;
+    week_id: string;
     worker_id: string;
     job_type?: string;
     daily_rate: number;
@@ -187,21 +210,43 @@ export const workerService = {
     if (!isSupabaseConfigured) {
       throw new Error('Supabase database tidak terkonfigurasi.');
     }
+
+    if (!data.week_id) {
+      throw new Error('Minggu proyek belum memiliki week_id dari database.');
+    }
+
     const days = Number(data.work_days) || 0;
     const rate = Number(data.daily_rate) || 0;
-    const totalWage = data.total_wage ?? (days * rate);
+    const dbStatus = mapPaymentStatusToDB(data.payment_status);
+
+    // Check if assignment already exists for this week_id and worker_id
+    const { data: existing } = await supabase
+      .from('dataku_week_workers')
+      .select('id')
+      .eq('week_id', data.week_id)
+      .eq('worker_id', data.worker_id)
+      .maybeSingle();
+
+    if (existing) {
+      return await this.updateWeekWorker(existing.id, {
+        job_type: data.job_type || 'Tukang',
+        daily_rate: rate,
+        work_days: days,
+        payment_status: data.payment_status || 'BELUM_DIBAYAR',
+        notes: data.notes || ''
+      });
+    }
 
     const { data: created, error } = await supabase
       .from('dataku_week_workers')
       .insert({
         project_id: String(data.project_id),
-        week_id: data.week_id || null,
+        week_id: data.week_id,
         worker_id: data.worker_id,
         job_type: data.job_type || 'Tukang',
         daily_rate: rate,
         work_days: days,
-        total_wage: totalWage,
-        payment_status: data.payment_status || 'BELUM_DIBAYAR',
+        payment_status: dbStatus,
         notes: data.notes || ''
       })
       .select()
@@ -221,9 +266,10 @@ export const workerService = {
     const payload: any = { ...updates, updated_at: new Date().toISOString() };
     delete payload.id;
     delete payload.created_at;
+    delete payload.total_wage; // Generated column calculated automatically by Postgres
 
-    if (payload.work_days !== undefined && payload.daily_rate !== undefined) {
-      payload.total_wage = Number(payload.work_days) * Number(payload.daily_rate);
+    if (payload.payment_status) {
+      payload.payment_status = mapPaymentStatusToDB(payload.payment_status);
     }
 
     const { data, error } = await supabase
@@ -319,10 +365,14 @@ export const workerService = {
 export function mapSupabaseToAppWorkers(
   weekWorkers: DatakuWeekWorker[],
   masterWorkers: DatakuWorker[],
-  payments: DatakuWorkerPayment[]
+  payments: DatakuWorkerPayment[],
+  projectWeeks: DatakuProjectWeek[] = []
 ): Worker[] {
   const masterMap = new Map<string, DatakuWorker>();
   masterWorkers.forEach(mw => masterMap.set(mw.id, mw));
+
+  const weekMap = new Map<string, DatakuProjectWeek>();
+  projectWeeks.forEach(pw => weekMap.set(pw.id, pw));
 
   return weekWorkers.map(ww => {
     const mw = masterMap.get(ww.worker_id);
@@ -338,25 +388,32 @@ export function mapSupabaseToAppWorkers(
     );
     const totalPaid = matchingPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
-    let status: 'BELUM_DIBAYAR' | 'SEBAGIAN' | 'LUNAS' = 'BELUM_DIBAYAR';
+    let status: 'BELUM_DIBAYAR' | 'SEBAGIAN' | 'LUNAS' = mapPaymentStatusFromDB(ww.payment_status);
     if (totalPaid >= totalWages && totalWages > 0) {
       status = 'LUNAS';
     } else if (totalPaid > 0) {
       status = 'SEBAGIAN';
-    } else if (ww.payment_status === 'LUNAS' || ww.payment_status === 'SEBAGIAN' || ww.payment_status === 'BELUM_DIBAYAR') {
-      status = ww.payment_status;
     }
 
     const latestPayment = matchingPayments[0];
 
-    // Extract week number from notes or defaults
+    // Determine week number from dataku_project_weeks or notes
     let weekNumber: number | undefined = undefined;
-    if (ww.notes) {
+    let weekStartDate: string | undefined = undefined;
+    let weekEndDate: string | undefined = undefined;
+
+    if (ww.week_id && weekMap.has(ww.week_id)) {
+      const pw = weekMap.get(ww.week_id)!;
+      weekNumber = pw.week_number;
+      weekStartDate = pw.week_start || undefined;
+      weekEndDate = pw.week_end || undefined;
+    } else if (ww.notes) {
       const match = ww.notes.match(/Minggu\s*(\d+)/i);
       if (match && match[1]) {
         weekNumber = parseInt(match[1], 10);
       }
     }
+
     if (!weekNumber) {
       weekNumber = 2; // Default active week
     }
@@ -374,6 +431,8 @@ export function mapSupabaseToAppWorkers(
       paymentMethod: latestPayment?.payment_method || 'Kas Tunai',
       notes: ww.notes || undefined,
       weekNumber: weekNumber,
+      weekStartDate: weekStartDate,
+      weekEndDate: weekEndDate,
       masterWorkerId: ww.worker_id
     };
   });
@@ -392,3 +451,4 @@ export function mapToMasterWorker(dw: DatakuWorker): MasterWorker {
     specialty: dw.job_type
   };
 }
+

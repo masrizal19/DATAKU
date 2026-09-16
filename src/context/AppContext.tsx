@@ -12,6 +12,7 @@ import {
   mapToMasterWorker,
   DatakuWorker
 } from '../services/workerService';
+import { projectWeekService, DatakuProjectWeek } from '../services/projectWeekService';
 import { AppState, User, Project, Transaction, Material, MaterialLog, Worker, MasterWorker, DailyReport, Notification, MaterialCategory } from '../types';
 import {
   initialCurrentUser,
@@ -164,16 +165,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const loadWorkers = useCallback(async () => {
     if (!isSupabaseConfigured) return;
     try {
-      const [rawMaster, rawWeek, rawPayments] = await Promise.all([
+      const activeProjId = localStorage.getItem(ACTIVE_PROJECT_KEY);
+      const [rawMaster, rawWeek, rawPayments, projectWeeks] = await Promise.all([
         workerService.getMasterWorkers(),
         workerService.getWeekWorkers(),
-        workerService.getWorkerPayments()
+        workerService.getWorkerPayments(),
+        activeProjId ? projectWeekService.getProjectWeeks(activeProjId) : Promise.resolve([])
       ]);
 
       const mappedMaster = rawMaster.map(mapToMasterWorker);
       setMasterWorkers(mappedMaster);
 
-      const mappedAppWorkers = mapSupabaseToAppWorkers(rawWeek, rawMaster, rawPayments);
+      const mappedAppWorkers = mapSupabaseToAppWorkers(rawWeek, rawMaster, rawPayments, projectWeeks);
 
       setState(prev => ({
         ...prev,
@@ -210,7 +213,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [loadProjects]);
 
-  // Realtime synchronization for public.dataku_workers, public.dataku_week_workers, and public.dataku_worker_payments
+  // Realtime synchronization for public.dataku_workers, public.dataku_project_weeks, public.dataku_week_workers, and public.dataku_worker_payments
   useEffect(() => {
     loadWorkers();
 
@@ -224,6 +227,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           event: '*',
           schema: 'public',
           table: 'dataku_workers'
+        },
+        () => {
+          loadWorkers();
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'dataku_project_weeks'
         },
         () => {
           loadWorkers();
@@ -817,16 +831,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           mWorkerId = created.id;
         }
 
-        const targetWeek = worker.weekNumber || 2;
-        const notes = worker.notes || `Minggu ${targetWeek}`;
+        const targetWeekNum = worker.weekNumber || 2;
+        const activeProj = state.projects.find(p => p.id === state.activeProjectId);
+
+        // Ensure project weeks exist in database and fetch week_id
+        const pWeeks = await projectWeekService.ensureProjectWeeks(
+          state.activeProjectId,
+          activeProj?.startDate
+        );
+
+        let targetWeek = pWeeks.find(pw => pw.week_number === targetWeekNum);
+        if (!targetWeek && pWeeks.length > 0) {
+          targetWeek = pWeeks[0];
+        }
+
+        if (!targetWeek || !targetWeek.id) {
+          throw new Error('Minggu proyek belum memiliki week_id dari database.');
+        }
+
+        const weekId = targetWeek.id;
+        const notes = worker.notes || `Minggu ${targetWeekNum}`;
 
         await workerService.assignWorkerToWeek({
           project_id: String(state.activeProjectId),
+          week_id: weekId,
           worker_id: mWorkerId,
           job_type: worker.position,
           daily_rate: worker.dailyRate,
           work_days: worker.daysWorked,
-          total_wage: (worker.daysWorked * worker.dailyRate) + (worker.bonus || 0) - (worker.potongan || 0),
           payment_status: worker.status || 'BELUM_DIBAYAR',
           notes: notes
         });
