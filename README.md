@@ -58,13 +58,26 @@ npm run preview
 
 ---
 
+## Custom Domain Production
+
+Aplikasi ini di-host pada custom domain:
+**https://dataku.mkverse.my.id**
+
+File `public/CNAME` telah disediakan dengan isi:
+```text
+dataku.mkverse.my.id
+```
+Sehingga custom domain akan selalu dipertahankan secara otomatis saat GitHub Actions melakukan deployment ke GitHub Pages.
+
+---
+
 ## Environment Variables
 
 Aplikasi membutuhkan variabel lingkungan berikut:
 
 - `VITE_SUPABASE_URL`: URL instance Supabase Anda (contoh: `https://xxxx.supabase.co`).
 - `VITE_SUPABASE_PUBLISHABLE_KEY`: Publishable Key (`sb_publishable_...` atau anon key) untuk otentikasi client Supabase.
-- `VITE_BASE_PATH` *(Opsional)*: Base path untuk routing (default otomatis mendeteksi repository GitHub Pages).
+- `VITE_BASE_PATH` *(Opsional)*: Base path untuk routing (default `/` untuk custom domain).
 
 > **Peringatan Keamanan**: Jangan pernah memasukkan `service_role` key, database password, atau private credential ke dalam frontend.
 

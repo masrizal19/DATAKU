@@ -15,18 +15,12 @@ export default defineConfig(() => {
     ''
   ).trim();
 
-  // Support GitHub Pages base path:
-  // 1. Explicit env var VITE_BASE_PATH if provided (e.g. '/dataku/' or '/')
-  // 2. Or auto-detected from GITHUB_REPOSITORY (e.g. 'username/dataku' -> '/dataku/')
-  // 3. Otherwise default to '/' (local dev, custom domain, or container runtime)
-  const derivedBase = process.env.VITE_BASE_PATH ?? (
-    process.env.GITHUB_REPOSITORY
-      ? `/${process.env.GITHUB_REPOSITORY.split('/')[1]}/`
-      : '/'
-  );
+  // Custom domain production (https://dataku.mkverse.my.id) is served from root '/'.
+  // Use VITE_BASE_PATH only if explicitly provided by user.
+  const base = process.env.VITE_BASE_PATH || '/';
 
   return {
-    base: derivedBase,
+    base,
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
