@@ -974,15 +974,70 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updateWorker = async (updatedWorker: Worker) => {
     try {
       if (isSupabaseConfigured) {
-        await workerService.updateWeekWorker(updatedWorker.id, {
+        // 1. Resolve target week_id from dataku_project_weeks if weekNumber is set
+        let targetWeekId: string | undefined = undefined;
+        if (updatedWorker.weekNumber && updatedWorker.projectId) {
+          const weeks = await projectWeekService.ensureProjectWeeks(updatedWorker.projectId);
+          const matchedWeek = weeks.find(w => w.week_number === updatedWorker.weekNumber);
+          if (!matchedWeek) {
+            throw new Error('Minggu kerja belum tersedia untuk proyek ini.');
+          }
+          targetWeekId = matchedWeek.id;
+
+          // If weekStartDate or weekEndDate provided, update public.dataku_project_weeks
+          if (updatedWorker.weekStartDate || updatedWorker.weekEndDate) {
+            await projectWeekService.updateProjectWeek(matchedWeek.id, {
+              week_start: updatedWorker.weekStartDate || matchedWeek.week_start || undefined,
+              week_end: updatedWorker.weekEndDate || matchedWeek.week_end || undefined
+            });
+          }
+        }
+
+        // 2. Update public.dataku_week_workers by ID
+        const weekWorkerPayload: any = {
           work_days: updatedWorker.daysWorked,
           daily_rate: updatedWorker.dailyRate,
-          total_wage: (updatedWorker.daysWorked * updatedWorker.dailyRate) + (updatedWorker.bonus || 0) - (updatedWorker.potongan || 0),
           payment_status: updatedWorker.status,
           notes: updatedWorker.notes,
           job_type: updatedWorker.position
-        });
+        };
 
+        if (targetWeekId) {
+          weekWorkerPayload.week_id = targetWeekId;
+        }
+
+        await workerService.updateWeekWorker(updatedWorker.id, weekWorkerPayload);
+
+        // 3. Update or Create public.dataku_worker_payments
+        const existingPayments = await workerService.getWorkerPayments(updatedWorker.projectId);
+        const matchedPayment = existingPayments.find(
+          p => p.week_worker_id === updatedWorker.id || (updatedWorker.masterWorkerId && p.worker_id === updatedWorker.masterWorkerId && p.project_id === updatedWorker.projectId)
+        );
+
+        const netWages = (updatedWorker.daysWorked * updatedWorker.dailyRate) + (updatedWorker.bonus || 0) - (updatedWorker.potongan || 0);
+
+        if (matchedPayment) {
+          await workerService.updateWorkerPayment(matchedPayment.id, {
+            payment_date: updatedWorker.paymentDate || matchedPayment.payment_date,
+            payment_method: updatedWorker.paymentMethod || matchedPayment.payment_method,
+            notes: updatedWorker.notes || matchedPayment.notes,
+            receipt_attachment_id: updatedWorker.attachmentUrl !== undefined ? updatedWorker.attachmentUrl : matchedPayment.receipt_attachment_id
+          });
+        } else if (updatedWorker.paymentDate || updatedWorker.status === 'LUNAS' || updatedWorker.status === 'SEBAGIAN') {
+          await workerService.createWorkerPayment({
+            project_id: updatedWorker.projectId,
+            week_id: targetWeekId || null,
+            week_worker_id: updatedWorker.id,
+            worker_id: updatedWorker.masterWorkerId || '',
+            amount: netWages,
+            payment_date: updatedWorker.paymentDate || new Date().toISOString().substring(0, 10),
+            payment_method: updatedWorker.paymentMethod || 'Kas Tunai',
+            notes: updatedWorker.notes || '',
+            receipt_attachment_id: updatedWorker.attachmentUrl || null
+          });
+        }
+
+        // 4. Update Master Worker
         if (updatedWorker.masterWorkerId) {
           await workerService.updateMasterWorker(updatedWorker.masterWorkerId, {
             name: updatedWorker.name,
@@ -1002,6 +1057,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (err: any) {
       console.error('Failed to update worker:', err);
       triggerNotification(`Gagal memperbarui data pekerja: ${err.message || 'Error'}`, 'WARNING');
+      throw err;
     }
   };
 

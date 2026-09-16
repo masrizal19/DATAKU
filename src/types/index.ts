@@ -119,6 +119,7 @@ export interface Worker {
   weekStartDate?: string;
   weekEndDate?: string;
   masterWorkerId?: string;
+  attachmentUrl?: string;
 }
 
 export interface CurrentReportData {

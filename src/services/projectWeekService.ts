@@ -89,5 +89,24 @@ export const projectWeekService = {
       console.error('Failed to ensure dataku_project_weeks:', err);
       return await this.getProjectWeeks(projectId);
     }
+  },
+
+  async updateProjectWeek(id: string, updates: { week_start?: string; week_end?: string; notes?: string }): Promise<DatakuProjectWeek | null> {
+    if (!isSupabaseConfigured || !id) return null;
+    const { data, error } = await supabase
+      .from('dataku_project_weeks')
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating dataku_project_week:', error);
+      throw error;
+    }
+    return data as DatakuProjectWeek;
   }
 };

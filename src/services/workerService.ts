@@ -392,6 +392,28 @@ export const workerService = {
       throw error;
     }
     return data as DatakuWorkerPayment;
+  },
+
+  async updateWorkerPayment(id: string, updates: Partial<DatakuWorkerPayment>): Promise<DatakuWorkerPayment> {
+    if (!isSupabaseConfigured) {
+      throw new Error('Supabase database tidak terkonfigurasi.');
+    }
+    const payload: any = { ...updates, updated_at: new Date().toISOString() };
+    delete payload.id;
+    delete payload.created_at;
+
+    const { data, error } = await supabase
+      .from('dataku_worker_payments')
+      .update(payload)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating dataku_worker_payment:', error);
+      throw error;
+    }
+    return data as DatakuWorkerPayment;
   }
 };
 

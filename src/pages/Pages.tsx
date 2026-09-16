@@ -36,6 +36,7 @@ import {
 import { Transaction, Material, MaterialLog, Worker, DailyReport, Project, MaterialCategory, MasterWorker } from '../types';
 import { buildCurrentReportData, exportReportToExcel, exportReportToCSV } from '../utils/rekapEngine';
 import { PrintPreviewModal } from '../components/PrintPreviewModal';
+import { documentService } from '../services/documentService';
 import {
   loadGoogleSheetsConnection,
   connectGoogleSheets,
@@ -1048,6 +1049,8 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
   const [printAllWorkers, setPrintAllWorkers] = useState<boolean>(false);
   const [selectedWeek, setSelectedWeek] = useState<number | 'all'>(2); // Default to current active week (Minggu 2)
   const [showMasterWorkerModal, setShowMasterWorkerModal] = useState<boolean>(false);
+  const [editSaveError, setEditSaveError] = useState<string | null>(null);
+  const [isUploadingDocument, setIsUploadingDocument] = useState<boolean>(false);
   
   // Custom dropdown menu state for individual cards
   const [activeMenuWorkerId, setActiveMenuWorkerId] = useState<string | null>(null);
@@ -1085,21 +1088,26 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
   const belumDibayar = totalKewajiban - sudahDibayar;
 
   // Handle Edit Save
-  const handleSaveEdit = (e: React.FormEvent) => {
+  const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (editingWorker) {
-      updateWorker({
-        ...editingWorker,
-        totalWages: editingWorker.daysWorked * editingWorker.dailyRate
-      });
-      // Sync detailed viewer if open
-      if (selectedWorker?.id === editingWorker.id) {
-        setSelectedWorker({
+      setEditSaveError(null);
+      try {
+        await updateWorker({
           ...editingWorker,
           totalWages: editingWorker.daysWorked * editingWorker.dailyRate
         });
+        // Sync detailed viewer if open
+        if (selectedWorker?.id === editingWorker.id) {
+          setSelectedWorker({
+            ...editingWorker,
+            totalWages: editingWorker.daysWorked * editingWorker.dailyRate
+          });
+        }
+        setEditingWorker(null);
+      } catch (err: any) {
+        setEditSaveError(err.message || 'Gagal memperbarui data pekerja.');
       }
-      setEditingWorker(null);
     }
   };
 
@@ -1472,10 +1480,18 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
               <div className="border-2 border-[#0F172A] rounded-xl overflow-hidden bg-white">
                 <div className="grid grid-cols-2 divide-x divide-y divide-[#0F172A]/10 text-xs font-semibold">
                   <div className="p-3">
+                    <span className="text-[9px] text-[#64748B] font-extrabold uppercase block">Minggu Kerja</span>
+                    <span className="text-slate-800 font-bold block mt-1">Minggu {selectedWorker.weekNumber || 1}</span>
+                  </div>
+                  <div className="p-3">
                     <span className="text-[9px] text-[#64748B] font-extrabold uppercase block">Status Pembayaran</span>
                     <Badge type={selectedWorker.status === 'BELUM_DIBAYAR' ? 'danger' : selectedWorker.status === 'SEBAGIAN' ? 'warning' : 'success'} className="mt-1">
                       {selectedWorker.status}
                     </Badge>
+                  </div>
+                  <div className="p-3">
+                    <span className="text-[9px] text-[#64748B] font-extrabold uppercase block">Periode Kerja</span>
+                    <span className="text-slate-800 font-bold block mt-1">{selectedWorker.weekStartDate || '-'} s/d {selectedWorker.weekEndDate || '-'}</span>
                   </div>
                   <div className="p-3">
                     <span className="text-[9px] text-[#64748B] font-extrabold uppercase block">Tanggal Pembayaran</span>
@@ -1502,6 +1518,12 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
                     <span className="text-slate-800 font-extrabold block mt-1 uppercase">{selectedWorker.paymentMethod || 'Tunai (Kas Mandor)'}</span>
                   </div>
                 </div>
+                {selectedWorker.attachmentUrl && (
+                  <div className="p-3 border-t border-[#0F172A]/10 bg-emerald-50 flex items-center justify-between text-xs font-bold text-emerald-800">
+                    <span>📄 Bukti Slip Terlampir</span>
+                    <a href={selectedWorker.attachmentUrl} target="_blank" rel="noreferrer" className="underline hover:text-emerald-950">Lihat / Download</a>
+                  </div>
+                )}
                 <div className="p-4 border-t-2 border-[#0F172A] bg-slate-50 flex justify-between items-center">
                   <span className="text-xs font-extrabold text-[#0F172A] uppercase">Total Upah Bersih</span>
                   <span className="font-chunky text-lg text-emerald-700">{formatRupiah(getNetWages(selectedWorker))}</span>
@@ -1558,13 +1580,20 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
 
       {/* 3. EDIT WORKER / SLIP CONFIG MODAL */}
       {editingWorker && (
-        <div className="fixed inset-0 bg-[#0F172A]/70 flex items-center justify-center z-50 p-4 select-none animate-fade-in">
-          <div className="bg-white border-3 border-[#0F172A] rounded-2xl w-full max-w-md shadow-neo-lg overflow-hidden">
+        <div className="fixed inset-0 bg-[#0F172A]/70 flex items-center justify-center z-50 p-4 select-none animate-fade-in overflow-y-auto">
+          <div className="bg-white border-3 border-[#0F172A] rounded-2xl w-full max-w-md shadow-neo-lg overflow-hidden my-8">
             <div className="bg-[#FAF8FF] border-b-2 border-[#0F172A] p-4 flex justify-between items-center">
               <h4 className="font-chunky text-sm text-[#0F172A] uppercase">EDIT DETIL GAJI: {editingWorker.name}</h4>
               <button onClick={() => setEditingWorker(null)} className="text-xs font-bold p-1 border border-slate-300 rounded">Batal</button>
             </div>
-            <form onSubmit={handleSaveEdit} className="p-5 space-y-4">
+            <form onSubmit={handleSaveEdit} className="p-5 space-y-4 max-h-[80vh] overflow-y-auto">
+              {editSaveError && (
+                <div className="p-3 bg-red-50 border-2 border-red-400 rounded-xl text-xs font-bold text-red-700 flex items-start gap-2">
+                  <span className="shrink-0">⚠️</span>
+                  <span className="leading-snug">{editSaveError}</span>
+                </div>
+              )}
+
               <div>
                 <label className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wide block mb-1">Nama Pekerja</label>
                 <input
@@ -1574,6 +1603,51 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
                   onChange={(e) => setEditingWorker({ ...editingWorker, name: e.target.value })}
                   className="w-full bg-white border-2 border-[#0F172A] rounded-xl px-3 py-2 text-xs font-bold focus:outline-none"
                 />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wide block mb-1">Minggu Kerja</label>
+                  <select
+                    value={editingWorker.weekNumber || 1}
+                    onChange={(e) => setEditingWorker({ ...editingWorker, weekNumber: parseInt(e.target.value) || 1 })}
+                    className="w-full bg-white border-2 border-[#0F172A] rounded-xl px-3 py-2 text-xs font-bold focus:outline-none"
+                  >
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(wNum => (
+                      <option key={wNum} value={wNum}>Minggu {wNum}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wide block mb-1">Tanggal Pembayaran Gaji</label>
+                  <input
+                    type="date"
+                    value={editingWorker.paymentDate || new Date().toISOString().substring(0, 10)}
+                    onChange={(e) => setEditingWorker({ ...editingWorker, paymentDate: e.target.value })}
+                    className="w-full bg-white border-2 border-[#0F172A] rounded-xl px-3 py-2 text-xs font-bold focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wide block mb-1">Tanggal Mulai Kerja</label>
+                  <input
+                    type="date"
+                    value={editingWorker.weekStartDate || ''}
+                    onChange={(e) => setEditingWorker({ ...editingWorker, weekStartDate: e.target.value })}
+                    className="w-full bg-white border-2 border-[#0F172A] rounded-xl px-3 py-2 text-xs font-bold focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wide block mb-1">Tanggal Selesai Kerja</label>
+                  <input
+                    type="date"
+                    value={editingWorker.weekEndDate || ''}
+                    onChange={(e) => setEditingWorker({ ...editingWorker, weekEndDate: e.target.value })}
+                    className="w-full bg-white border-2 border-[#0F172A] rounded-xl px-3 py-2 text-xs font-bold focus:outline-none"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -1649,6 +1723,38 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
                     <option value="Dompet Digital">Dompet Digital</option>
                   </select>
                 </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wide block mb-1">Upload Dokumen / Bukti Slip (JPG, PNG, WEBP, PDF)</label>
+                <input
+                  type="file"
+                  accept=".jpg,.jpeg,.png,.webp,.pdf,image/*,application/pdf"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      try {
+                        setIsUploadingDocument(true);
+                        const meta = await documentService.uploadDocument(file, 'SLIP_GAJI');
+                        setEditingWorker({ ...editingWorker, attachmentUrl: meta.fileUrl });
+                      } catch (err: any) {
+                        alert('Gagal mengunggah dokumen: ' + (err.message || 'Error'));
+                      } finally {
+                        setIsUploadingDocument(false);
+                      }
+                    }
+                  }}
+                  className="w-full bg-white border-2 border-[#0F172A] rounded-xl px-3 py-1.5 text-xs font-bold focus:outline-none file:mr-2 file:py-1 file:px-2 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-[#0F172A] file:text-white hover:file:bg-slate-700"
+                />
+                {isUploadingDocument && (
+                  <p className="text-[11px] font-bold text-amber-700 mt-1">Mengunggah dokumen...</p>
+                )}
+                {editingWorker.attachmentUrl && !isUploadingDocument && (
+                  <div className="mt-1 flex items-center justify-between text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 p-2 rounded-lg">
+                    <span>✓ Dokumen / Slip Terlampir</span>
+                    <a href={editingWorker.attachmentUrl} target="_blank" rel="noreferrer" className="underline font-bold hover:text-emerald-900">Lihat / Download</a>
+                  </div>
+                )}
               </div>
 
               <div>
