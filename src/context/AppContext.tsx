@@ -74,10 +74,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (saved) {
       try {
         loadedState = JSON.parse(saved);
-        // Ensure projects are initialized cleanly if empty
-        if (!Array.isArray(loadedState.projects)) {
-          loadedState.projects = [];
-        }
       } catch (e) {
         console.error('Error parsing saved state', e);
         loadedState = {
@@ -106,6 +102,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }
 
+    // Projects & Workers MUST always come from Supabase as source of truth
+    loadedState.projects = [];
+    loadedState.workers = [];
+
     if (isAuthenticated) {
       loadedState.currentUser = {
         id: `MDR-${loggedUser.toUpperCase().replace(/\s+/g, '')}`,
@@ -125,11 +125,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!isSupabaseConfigured) return;
     try {
       const data = await projectService.getProjects();
-      const currentActiveId = localStorage.getItem(ACTIVE_PROJECT_KEY) || state.activeProjectId;
+      const storedActiveId = localStorage.getItem(ACTIVE_PROJECT_KEY);
       
-      const mapped = data.map(p => mapSupabaseProjectToProject(p, currentActiveId));
+      const mapped = data.map(p => mapSupabaseProjectToProject(p, storedActiveId));
       
       setState(prev => {
+        const currentActiveId = storedActiveId || prev.activeProjectId;
         let nextActiveId = currentActiveId;
         const activeExists = mapped.some(p => p.id === nextActiveId && !p.isArchived);
         if (!activeExists) {
@@ -157,7 +158,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (err) {
       console.error('Gagal memuat data proyek dari Supabase:', err);
     }
-  }, [state.activeProjectId]);
+  }, []);
 
   // Load Workers, Week Workers, and Payments directly from Supabase
   const loadWorkers = useCallback(async () => {

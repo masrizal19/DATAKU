@@ -23,9 +23,9 @@ export const isSupabaseConfigured = hasSupabaseUrl && hasSupabasePublishableKey;
 
 // Safe runtime diagnostic: log presence without revealing secrets
 if (typeof window !== 'undefined') {
-  console.log('DATAKU Supabase Config Status:', {
-    hasSupabaseUrl,
-    hasSupabasePublishableKey
+  console.info('[DATAKU] Supabase configured:', {
+    url: Boolean(import.meta.env.VITE_SUPABASE_URL),
+    publishableKey: Boolean(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY)
   });
 }
 
@@ -43,10 +43,47 @@ try {
     client = createClient('https://placeholder.supabase.co', 'placeholder-publishable-key');
   }
 } catch (initErr) {
-  console.error('Supabase initialization warning:', initErr);
+  console.error('[DATAKU] Supabase initialization warning:', initErr);
   client = createClient('https://placeholder.supabase.co', 'placeholder-publishable-key');
 }
 
 export const supabase = client;
+
+// Safe internal database connection test function
+export async function testSupabaseConnection(): Promise<boolean> {
+  if (!isSupabaseConfigured) {
+    console.info('[DATAKU] Supabase connection test skipped: not configured');
+    return false;
+  }
+  try {
+    const { data, error } = await supabase
+      .from('projects')
+      .select('id')
+      .limit(1);
+
+    console.info('[DATAKU] projects query:', {
+      success: !error,
+      count: data?.length ?? 0
+    });
+
+    if (error) {
+      console.error('[DATAKU] projects query error:', {
+        code: error.code,
+        message: error.message
+      });
+      return false;
+    }
+    return true;
+  } catch (err: any) {
+    console.error('[DATAKU] projects connection test exception:', err?.message || err);
+    return false;
+  }
+}
+
+// Automatically test connection when running in browser
+if (typeof window !== 'undefined') {
+  testSupabaseConnection();
+}
+
 
 
