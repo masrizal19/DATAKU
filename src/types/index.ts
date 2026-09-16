@@ -4,6 +4,7 @@
  */
 
 export interface User {
+  id?: string;
   name: string;
   photo: string;
   phone: string;
@@ -85,6 +86,17 @@ export interface MaterialLog {
   photos: string[];
 }
 
+export interface MasterWorker {
+  id: string;
+  projectId?: string;
+  name: string;
+  position: string;
+  dailyRate: number;
+  phone?: string;
+  photo?: string;
+  specialty?: string;
+}
+
 export interface Worker {
   id: string;
   projectId: string;
@@ -100,6 +112,48 @@ export interface Worker {
   paymentMethod?: string;
   notes?: string;
   photo?: string;
+  weekNumber?: number;
+  weekStartDate?: string;
+  weekEndDate?: string;
+  masterWorkerId?: string;
+}
+
+export interface CurrentReportData {
+  project: {
+    id: string;
+    name: string;
+    location: string;
+    owner: string;
+    mandorName: string;
+    budget: number;
+    startDate: string;
+  };
+  period: {
+    type: 'hari' | 'minggu' | 'bulan' | 'custom' | 'project_week';
+    weekNumber?: number;
+    startDate: string;
+    endDate: string;
+    label: string;
+  };
+  printDate: string;
+  ringkasan: {
+    danaMasuk: number;
+    pengeluaran: number;
+    upahTukang: number;
+    pembelianMaterial: number;
+    saldoKas: number;
+  };
+  mutasiDana: Transaction[];
+  rekapUpah: Worker[];
+  ringkasanMaterial: {
+    materialName: string;
+    unit: string;
+    masuk: number;
+    keluar: number;
+    terpakai: number;
+    sisaStok: number;
+  }[];
+  laporanHarian: DailyReport[];
 }
 
 export interface DailyReport {

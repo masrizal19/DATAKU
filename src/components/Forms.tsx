@@ -3,10 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Button, Input, TextArea, Select } from './Common';
-import { Camera, Image, Check, Trash2, Sliders, DollarSign, Calendar, MapPin, Hammer, CloudSun } from 'lucide-react';
+import { Camera, Image, Check, Trash2, Sliders, DollarSign, Calendar, MapPin, Hammer, CloudSun, RefreshCw } from 'lucide-react';
 import { MaterialCategory } from '../types';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 // Mock high quality construction photo assets for simulation
 const MOCK_PHOTOS = {
@@ -20,7 +21,7 @@ const MOCK_PHOTOS = {
   alat: 'https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=400&auto=format&fit=crop&q=80'
 };
 
-// --- SIMULATED CAMERA & GALLERY UPLOAD COMPONENT ---
+// --- REAL CAMERA & GALLERY UPLOAD COMPONENT ---
 interface PhotoSelectorProps {
   label: string;
   photoType: keyof typeof MOCK_PHOTOS;
@@ -38,30 +39,134 @@ export const PhotoSelector: React.FC<PhotoSelectorProps> = ({
   onRemovePhoto,
   multiple = false
 }) => {
-  const [showCameraSim, setShowCameraSim] = useState(false);
-  const [cameraMode, setCameraMode] = useState<'kamera' | 'galeri'>('kamera');
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [localPreviewUrl, setLocalPreviewUrl] = useState<string>('');
+  const [uploading, setUploading] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
 
-  const triggerSelect = () => {
-    setShowCameraSim(true);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileSelection = (file: File) => {
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg', 'image/heic', 'image/heif'];
+    if (!allowedTypes.includes(file.type.toLowerCase()) && !file.type.startsWith('image/')) {
+      alert('Format foto harus JPG, PNG, WEBP atau HEIC.');
+      return;
+    }
+    const maxSize = 10 * 1024 * 1024; // 10MB limit
+    if (file.size > maxSize) {
+      alert('Ukuran file foto maksimal adalah 10 MB.');
+      return;
+    }
+
+    setPendingFile(file);
+    const objectUrl = URL.createObjectURL(file);
+    setLocalPreviewUrl(objectUrl);
+    setShowPreviewModal(true);
+    setCameraError(null);
   };
 
-  const handleCapture = () => {
-    // Select the appropriate mock asset URL based on key
-    const url = MOCK_PHOTOS[photoType] || MOCK_PHOTOS.pekerjaan;
-    onPhotoSelected(url);
-    setShowCameraSim(false);
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      handleFileSelection(file);
+    }
+  };
+
+  const triggerCamera = () => {
+    if (cameraInputRef.current) {
+      cameraInputRef.current.value = '';
+      cameraInputRef.current.click();
+    }
+  };
+
+  const triggerGallery = () => {
+    if (galleryInputRef.current) {
+      galleryInputRef.current.value = '';
+      galleryInputRef.current.click();
+    }
+  };
+
+  const handleUploadAndSave = async () => {
+    if (!pendingFile) return;
+
+    setUploading(true);
+    let finalUrl = '';
+
+    if (isSupabaseConfigured) {
+      try {
+        const timestamp = Date.now();
+        const randomString = Math.random().toString(36).substring(2, 8);
+        const fileExt = pendingFile.name.split('.').pop() || 'jpg';
+        const fileName = `${photoType}/${timestamp}_${randomString}.${fileExt}`;
+
+        const { data, error } = await supabase.storage
+          .from('dataku-files')
+          .upload(fileName, pendingFile, {
+            cacheControl: '3600',
+            upsert: false,
+            contentType: pendingFile.type
+          });
+
+        if (error) {
+          throw error;
+        }
+
+        const { data: { publicUrl } } = supabase.storage
+          .from('dataku-files')
+          .getPublicUrl(fileName);
+
+        finalUrl = publicUrl;
+      } catch (err: any) {
+        console.error('Real storage upload failed, using fallback:', err);
+        // Fallback to local preview URL or high-quality mock URL
+        finalUrl = localPreviewUrl || MOCK_PHOTOS[photoType] || MOCK_PHOTOS.pekerjaan;
+      }
+    } else {
+      // Offline fallback: Use the local object URL or mock
+      finalUrl = localPreviewUrl || MOCK_PHOTOS[photoType] || MOCK_PHOTOS.pekerjaan;
+    }
+
+    onPhotoSelected(finalUrl);
+    setUploading(false);
+    setShowPreviewModal(false);
+    setPendingFile(null);
+  };
+
+  const handleCancelPending = () => {
+    setPendingFile(null);
+    setLocalPreviewUrl('');
+    setShowPreviewModal(false);
   };
 
   return (
     <div className="mb-4">
-      <span className="block text-xs font-bold text-[#0F172A] uppercase mb-1.5 tracking-wider">
+      {/* Hidden File Inputs */}
+      <input
+        type="file"
+        accept="image/*"
+        capture="environment"
+        ref={cameraInputRef}
+        onChange={handleFileChange}
+        className="hidden"
+      />
+      <input
+        type="file"
+        accept="image/*"
+        ref={galleryInputRef}
+        onChange={handleFileChange}
+        className="hidden"
+      />
+
+      <span className="block text-xs font-extrabold text-[#0F172A] uppercase mb-1.5 tracking-wider">
         {label}
       </span>
-      
+
       <div className="flex flex-wrap gap-2.5 items-center">
-        {/* Previews */}
+        {/* Previews of selected photos */}
         {selectedPhotos.map((p, idx) => (
-          <div key={idx} className="relative w-20 h-20 rounded-xl border-2 border-[#0F172A] overflow-hidden group shadow-neo-sm bg-[#F1F5F9]">
+          <div key={idx} className="relative w-20 h-20 rounded-xl border-2 border-[#0F172A] overflow-hidden shadow-neo-sm bg-[#F1F5F9]">
             <img src={p} alt="Dokumentasi" className="w-full h-full object-cover" />
             <button
               type="button"
@@ -73,84 +178,90 @@ export const PhotoSelector: React.FC<PhotoSelectorProps> = ({
           </div>
         ))}
 
-        {/* Add photo button */}
+        {/* Buttons to trigger camera & gallery side-by-side */}
         {(multiple || selectedPhotos.length === 0) && (
-          <button
-            type="button"
-            onClick={triggerSelect}
-            className="w-20 h-20 rounded-xl border-2 border-dashed border-[#0F172A]/40 flex flex-col items-center justify-center gap-1 hover:bg-[#F8FAFC] active:scale-95 transition-all cursor-pointer bg-white"
-          >
-            <Camera className="w-5 h-5 text-[#475569]" />
-            <span className="text-[10px] font-bold text-[#475569] uppercase">Ambil</span>
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={triggerCamera}
+              className="w-20 h-20 rounded-xl border-2 border-dashed border-[#0F172A]/40 flex flex-col items-center justify-center gap-1 hover:bg-[#F8FAFC] active:scale-95 transition-all cursor-pointer bg-white"
+            >
+              <Camera className="w-5 h-5 text-[#475569]" />
+              <span className="text-[10px] font-extrabold text-[#475569] uppercase">Kamera</span>
+            </button>
+            <button
+              type="button"
+              onClick={triggerGallery}
+              className="w-20 h-20 rounded-xl border-2 border-dashed border-[#0F172A]/40 flex flex-col items-center justify-center gap-1 hover:bg-[#F8FAFC] active:scale-95 transition-all cursor-pointer bg-white"
+            >
+              <Image className="w-5 h-5 text-[#475569]" />
+              <span className="text-[10px] font-extrabold text-[#475569] uppercase">Galeri</span>
+            </button>
+          </div>
         )}
       </div>
 
-      {/* Camera Simulator Modal */}
-      {showCameraSim && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0F172A]/80 backdrop-blur-xs">
+      {/* Camera/Photo Preview Modal */}
+      {showPreviewModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0F172A]/80 backdrop-blur-xs select-none">
           <div className="bg-white border-2.5 border-[#0F172A] rounded-2xl w-full max-w-sm overflow-hidden shadow-neo-lg flex flex-col">
             <div className="bg-[#FAF8FF] border-b-2 border-[#0F172A] px-4 py-3 flex justify-between items-center">
-              <span className="text-xs font-bold uppercase text-[#0F172A] tracking-wider">Simulasi Kamera Mandor</span>
-              <button onClick={() => setShowCameraSim(false)} className="text-xs font-extrabold cursor-pointer">BATAL</button>
+              <span className="text-xs font-extrabold uppercase text-[#0F172A] tracking-wider">PREVIEW FOTO DOKUMENTASI</span>
+              <button type="button" onClick={handleCancelPending} className="text-xs font-extrabold cursor-pointer">BATAL</button>
             </div>
-            
-            <div className="p-4 space-y-4 flex-1">
-              {/* Tabs */}
-              <div className="flex border-2 border-[#0F172A] rounded-lg overflow-hidden text-xs font-bold">
-                <button
-                  type="button"
-                  onClick={() => setCameraMode('kamera')}
-                  className={`flex-1 py-2 text-center transition-colors cursor-pointer ${cameraMode === 'kamera' ? 'bg-[#0284C7] text-white' : 'bg-white hover:bg-[#F1F5F9]'}`}
-                >
-                  📸 Gunakan Kamera
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCameraMode('galeri')}
-                  className={`flex-1 py-2 text-center transition-colors cursor-pointer ${cameraMode === 'galeri' ? 'bg-[#0284C7] text-white' : 'bg-white hover:bg-[#F1F5F9]'}`}
-                >
-                  🖼️ Ambil dari Galeri
-                </button>
-              </div>
 
-              {/* Viewfinder area */}
+            <div className="p-4 space-y-4 flex-1">
               <div className="relative aspect-square rounded-xl border-2 border-[#0F172A] bg-black overflow-hidden flex items-center justify-center">
-                {cameraMode === 'kamera' ? (
-                  <>
-                    <div className="absolute inset-0 opacity-40 flex flex-col justify-between p-4">
-                      <div className="flex justify-between text-white font-mono text-[9px]">
-                        <span>ISO 400</span>
-                        <span>0.0s f/2.4</span>
-                      </div>
-                      {/* Grid overlay */}
-                      <div className="absolute inset-0 border border-white/20 grid grid-cols-3 grid-rows-3 pointer-events-none" />
-                    </div>
-                    {/* Simulated live feed lens image */}
-                    <img src={MOCK_PHOTOS[photoType] || MOCK_PHOTOS.pekerjaan} alt="Stream" className="w-full h-full object-cover opacity-80" />
-                    <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/60 text-white rounded-md px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider select-none animate-pulse">
-                      🔴 Lensa Aktif Lapangan
-                    </div>
-                  </>
+                {localPreviewUrl ? (
+                  <img src={localPreviewUrl} alt="Preview Foto Lapangan" className="w-full h-full object-cover" />
                 ) : (
-                  <div className="text-center p-6 space-y-3">
-                    <Image className="w-10 h-10 text-white mx-auto opacity-70" />
-                    <p className="text-xs text-white/90 font-bold">Simulasi Folder Album Handphone</p>
-                    <div className="bg-[#1E293B] border border-[#475569] rounded-lg p-2.5 text-left max-w-xs text-[10px] font-mono text-[#38BDF8]">
-                      📄 IMG_DATAKU_15092026_001.JPG
-                    </div>
+                  <div className="text-center p-6 text-white/70">
+                    <p className="text-xs font-bold">Mempersiapkan preview...</p>
+                  </div>
+                )}
+
+                {uploading && (
+                  <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center text-white space-y-2">
+                    <RefreshCw className="w-8 h-8 animate-spin" />
+                    <p className="text-xs font-extrabold uppercase tracking-wide">Mengunggah Foto...</p>
                   </div>
                 )}
               </div>
+
+              {cameraError && (
+                <div className="p-3 bg-red-100 border border-red-400 text-red-700 text-xs font-semibold rounded-xl text-center">
+                  ⚠️ {cameraError}
+                </div>
+              )}
             </div>
 
             <div className="bg-[#F8FAFC] border-t-2 border-[#0F172A] p-4 flex gap-3">
-              <Button variant="ghost" fullWidth onClick={() => setShowCameraSim(false)}>
-                Tutup
+              <Button
+                variant="ghost"
+                fullWidth
+                type="button"
+                disabled={uploading}
+                onClick={triggerCamera}
+              >
+                Foto Ulang
               </Button>
-              <Button variant="secondary" fullWidth onClick={handleCapture}>
-                <Check className="w-4 h-4" />
-                {cameraMode === 'kamera' ? 'Ambil Foto' : 'Pilih Foto'}
+              <Button
+                variant="ghost"
+                fullWidth
+                type="button"
+                disabled={uploading}
+                onClick={triggerGallery}
+              >
+                Pilih Lain
+              </Button>
+              <Button
+                variant="secondary"
+                fullWidth
+                type="button"
+                disabled={uploading || !pendingFile}
+                onClick={handleUploadAndSave}
+              >
+                Simpan
               </Button>
             </div>
           </div>

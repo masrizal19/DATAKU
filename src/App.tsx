@@ -4,9 +4,10 @@
  */
 
 import React, { useState } from 'react';
+import { isSupabaseConfigured } from './lib/supabase';
 import { AppProvider, useApp } from './context/AppContext';
 import { AuthScreen } from './pages/Auth';
-import { DesktopSidebar, MobileBottomNav, HeaderBanner } from './components/Navigation';
+import { DesktopSidebar, HeaderBanner, MobileBottomNav } from './components/Navigation';
 import { BottomSheet, Card, Toast } from './components/Common';
 import { ProjectCalculator } from './components/Calculator';
 import {
@@ -32,7 +33,41 @@ import {
   TambahPekerjaForm
 } from './components/Forms';
 import { formatRupiah, formatTanggal } from './utils/format';
-import { Search, Briefcase, FileText, DollarSign, Layers, Users } from 'lucide-react';
+import { Search, Briefcase, FileText, DollarSign, Layers, Users, Plus } from 'lucide-react';
+
+const VALID_TABS = [
+  'beranda',
+  'proyek',
+  'barang',
+  'stok',
+  'keuangan',
+  'rekap',
+  'upah',
+  'laporan',
+  'kalkulator',
+  'notifikasi',
+  'pengaturan'
+];
+
+function resolveTabFromUrl(): string {
+  try {
+    const hash = window.location.hash.replace(/^#[/]?/, '').trim().toLowerCase();
+    if (hash) {
+      if (hash === 'stok') return 'barang';
+      if (VALID_TABS.includes(hash)) return hash;
+    }
+
+    const segments = window.location.pathname.split('/').filter(Boolean);
+    const last = segments[segments.length - 1]?.toLowerCase();
+    if (last) {
+      if (last === 'stok') return 'barang';
+      if (VALID_TABS.includes(last)) return last;
+    }
+  } catch (e) {
+    // ignore
+  }
+  return 'beranda';
+}
 
 const MainAppContent: React.FC = () => {
   const {
@@ -48,11 +83,45 @@ const MainAppContent: React.FC = () => {
     addDailyReport
   } = useApp();
 
+  const [bypassSupabase, setBypassSupabase] = useState(() => {
+    return localStorage.getItem("dataku_bypass_supabase") === "true";
+  });
+
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     return localStorage.getItem("dataku_auth") === "true";
   });
-  const [currentTab, setTab] = useState('beranda');
+  const [currentTab, setCurrentTabState] = useState(() => resolveTabFromUrl());
+
+  const setTab = React.useCallback((newTab: string) => {
+    setCurrentTabState(newTab);
+    setSearchValue('');
+    try {
+      const segments = window.location.pathname.split('/').filter(Boolean);
+      const last = segments[segments.length - 1]?.toLowerCase();
+      let updatedPath: string;
+      if (last && (VALID_TABS.includes(last) || last === 'login')) {
+        segments[segments.length - 1] = newTab === 'beranda' ? '' : newTab;
+        updatedPath = '/' + segments.filter(Boolean).join('/');
+      } else {
+        const base = window.location.pathname.replace(/\/+$/, '');
+        updatedPath = (base === '' || base === '/' ? '' : base) + (newTab === 'beranda' ? '/' : `/${newTab}`);
+      }
+      if (!updatedPath.startsWith('/')) updatedPath = '/' + updatedPath;
+      window.history.pushState(null, '', updatedPath + window.location.search + window.location.hash);
+    } catch (e) {
+      // safe fallback
+    }
+  }, []);
+
+  React.useEffect(() => {
+    const onPopState = () => {
+      setCurrentTabState(resolveTabFromUrl());
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
   const [searchValue, setSearchValue] = useState('');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeSheet, setActiveSheet] = useState<
     | 'dana_masuk'
     | 'barang_masuk'
@@ -63,6 +132,7 @@ const MainAppContent: React.FC = () => {
     | 'laporan_harian'
     | 'tambah_tukang'
     | 'buat_proyek'
+    | 'aktivitas_cepat'
     | null
   >(null);
 
@@ -122,7 +192,7 @@ const MainAppContent: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex font-sans text-[#0F172A] pb-24 lg:pb-0">
-      {/* Desktop Sidebar Navigation */}
+      {/* Desktop Sidebar / Mobile Drawer Navigation */}
       <DesktopSidebar
         currentTab={currentTab}
         setTab={(t) => {
@@ -131,6 +201,8 @@ const MainAppContent: React.FC = () => {
         }}
         onQuickActionClick={() => setActiveSheet('dana_masuk')}
         onProfileClick={() => setTab('pengaturan')}
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
       />
 
       {/* Main Content Area */}
@@ -143,6 +215,7 @@ const MainAppContent: React.FC = () => {
           }}
           onSearchChange={(v) => setSearchValue(v)}
           searchValue={searchValue}
+          onOpenSidebar={() => setIsSidebarOpen(true)}
         />
 
         <main className="p-4 sm:p-6 max-w-7xl w-full mx-auto space-y-6">
@@ -269,6 +342,17 @@ const MainAppContent: React.FC = () => {
         </main>
       </div>
 
+      {/* Floating Action Button (FAB) for Mobile Quick Actions */}
+      <div className="lg:hidden fixed bottom-24 right-6 z-40 select-none">
+        <button
+          onClick={() => setActiveSheet('aktivitas_cepat')}
+          className="w-14 h-14 rounded-full bg-[#FAF8FF] border-3 border-[#0F172A] flex items-center justify-center font-extrabold text-[#0F172A] shadow-neo cursor-pointer transition-all active:scale-95 hover:bg-white"
+          aria-label="Aktivitas Cepat"
+        >
+          <Plus className="w-8 h-8" />
+        </button>
+      </div>
+
       {/* Mobile Bottom Navigation */}
       <MobileBottomNav
         currentTab={currentTab}
@@ -276,7 +360,7 @@ const MainAppContent: React.FC = () => {
           setTab(t);
           setSearchValue('');
         }}
-        onQuickActionClick={() => setActiveSheet('dana_masuk')}
+        onQuickActionClick={() => setActiveSheet('aktivitas_cepat')}
         onProfileClick={() => setTab('pengaturan')}
       />
 
@@ -303,9 +387,95 @@ const MainAppContent: React.FC = () => {
             ? 'Kirim Laporan Harian'
             : activeSheet === 'tambah_tukang'
             ? 'Tambah Tukang Baru'
+            : activeSheet === 'aktivitas_cepat'
+            ? 'AKTIVITAS CEPAT LAPANGAN'
             : ''
         }
       >
+        {activeSheet === 'aktivitas_cepat' && (
+          <div className="p-1 space-y-4 select-none">
+            <p className="text-xs text-[#64748B] font-bold uppercase tracking-wider mb-2">
+              Catat aktivitas lapangan sekarang
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setActiveSheet('dana_masuk')}
+                className="py-4 px-3 rounded-2xl border-2 border-[#0F172A] bg-[#E0F2FE] text-[#0F172A] font-extrabold text-xs shadow-neo-sm hover:translate-y-[2px] transition-all cursor-pointer flex flex-col items-center justify-center gap-2 text-center"
+              >
+                <span className="text-2xl">💰</span>
+                <span>DANA MASUK</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSheet('pengeluaran')}
+                className="py-4 px-3 rounded-2xl border-2 border-[#0F172A] bg-[#FFF7ED] text-[#0F172A] font-extrabold text-xs shadow-neo-sm hover:translate-y-[2px] transition-all cursor-pointer flex flex-col items-center justify-center gap-2 text-center"
+              >
+                <span className="text-2xl">💸</span>
+                <span>PENGELUARAN</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSheet('barang_masuk')}
+                className="py-4 px-3 rounded-2xl border-2 border-[#0F172A] bg-[#FEF3C7] text-[#0F172A] font-extrabold text-xs shadow-neo-sm hover:translate-y-[2px] transition-all cursor-pointer flex flex-col items-center justify-center gap-2 text-center"
+              >
+                <span className="text-2xl">📦</span>
+                <span>BARANG MASUK</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSheet('barang_keluar')}
+                className="py-4 px-3 rounded-2xl border-2 border-[#0F172A] bg-[#FAF8FF] text-[#0F172A] font-extrabold text-xs shadow-neo-sm hover:translate-y-[2px] transition-all cursor-pointer flex flex-col items-center justify-center gap-2 text-center"
+              >
+                <span className="text-2xl">📤</span>
+                <span>BARANG KELUAR</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSheet('barang_terpakai')}
+                className="py-4 px-3 rounded-2xl border-2 border-[#0F172A] bg-[#FEE2E2] text-[#0F172A] font-extrabold text-xs shadow-neo-sm hover:translate-y-[2px] transition-all cursor-pointer flex flex-col items-center justify-center gap-2 text-center"
+              >
+                <span className="text-2xl">🛠️</span>
+                <span>BARANG TERPAKAI</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSheet('upah_tukang')}
+                className="py-4 px-3 rounded-2xl border-2 border-[#0F172A] bg-[#D1FAE5] text-[#0F172A] font-extrabold text-xs shadow-neo-sm hover:translate-y-[2px] transition-all cursor-pointer flex flex-col items-center justify-center gap-2 text-center"
+              >
+                <span className="text-2xl">👷</span>
+                <span>BAYAR UPAH</span>
+              </button>
+            </div>
+            
+            <button
+              type="button"
+              onClick={() => setActiveSheet('laporan_harian')}
+              className="w-full py-4 px-3 rounded-2xl border-2 border-[#0F172A] bg-[#FAF8FF] text-[#0F172A] font-extrabold text-sm shadow-neo-sm hover:translate-y-[2px] transition-all cursor-pointer flex items-center justify-center gap-2 text-center"
+            >
+              <span className="text-xl">📝</span>
+              <span>KIRIM LAPORAN HARIAN PROYEK</span>
+            </button>
+
+            <div className="flex gap-2 pt-1 select-none">
+              <button
+                type="button"
+                onClick={() => setActiveSheet('tambah_tukang')}
+                className="flex-1 py-2 px-3 rounded-xl border border-[#0F172A] bg-white text-[#0F172A] font-bold text-xs shadow-neo-sm hover:bg-slate-50 cursor-pointer"
+              >
+                ＋ Tambah Pekerja
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSheet('buat_proyek')}
+                className="flex-1 py-2 px-3 rounded-xl border border-[#0F172A] bg-white text-[#0F172A] font-bold text-xs shadow-neo-sm hover:bg-slate-50 cursor-pointer"
+              >
+                🚧 Buat Proyek Baru
+              </button>
+            </div>
+          </div>
+        )}
+
         {activeSheet === 'buat_proyek' && (
           <ProyekForm
             onSubmit={(data) => {

@@ -6,7 +6,7 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { Card, Button, Badge } from '../components/Common';
-import { formatRupiah, formatTanggal, formatTanggalWaktu } from '../utils/format';
+import { formatRupiah, formatTanggal } from '../utils/format';
 import {
   TrendingUp,
   TrendingDown,
@@ -16,89 +16,61 @@ import {
   Calendar,
   Search,
   ChevronDown,
-  Info,
   Layers,
   Users,
-  Wallet
+  Wallet,
+  RefreshCw,
+  CheckCircle2
 } from 'lucide-react';
-import { Transaction } from '../types';
+import { Transaction, CurrentReportData } from '../types';
+import { buildCurrentReportData, exportReportToExcel, exportReportToCSV, ReportFilterOptions } from '../utils/rekapEngine';
+import { PrintPreviewModal } from '../components/PrintPreviewModal';
+import { getProjectWeeks, getJakartaDateString } from '../utils/datetime';
+import { syncReportToGoogleSheets, loadGoogleSheetsConnection } from '../services/googleSheetsService';
 
 export const RekapView: React.FC = () => {
   const { state } = useApp();
   const activeProj = state.projects.find(p => p.id === state.activeProjectId);
 
   // Filters State
-  const [periode, setPeriode] = useState<'hari' | 'minggu' | 'bulan' | '3bulan' | 'custom'>('bulan');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const [filterMode, setFilterMode] = useState<'hari' | 'minggu' | 'bulan' | 'project_week' | 'custom'>('bulan');
+  const [selectedWeekNum, setSelectedWeekNum] = useState<number>(2); // Default ke Minggu 2
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
   const [kategoriFilter, setKategoriFilter] = useState<string>('Semua');
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState<string>('');
 
-  // PDF / Document Preview State
-  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  // Modals & UI States
+  const [showPreviewModal, setShowPreviewModal] = useState<boolean>(false);
+  const [isSyncingSheets, setIsSyncingSheets] = useState<boolean>(false);
+  const [syncSuccessMessage, setSyncSuccessMessage] = useState<string | null>(null);
 
-  // 1. Filter transactions by Project
-  const projectTxs = useMemo(() => {
-    if (!activeProj) return [];
-    return state.transactions.filter(t => t.projectId === activeProj.id);
-  }, [state.transactions, activeProj]);
+  // Weeks available for this project
+  const projectWeeks = useMemo(() => {
+    return getProjectWeeks(activeProj?.startDate || '2026-09-01', 6);
+  }, [activeProj?.startDate]);
 
-  // 2. Filter transactions by Period
-  const periodicTxs = useMemo(() => {
-    if (projectTxs.length === 0) return [];
-    
-    const now = new Date();
-    const todayStr = now.toISOString().substring(0, 10);
-    
-    return projectTxs.filter(tx => {
-      const txDate = new Date(tx.date);
-      if (isNaN(txDate.getTime())) return true; // Keep if unparseable
-      
-      const txDateStr = tx.date.substring(0, 10);
+  // Filter options for the central Rekap Engine
+  const filterOptions: ReportFilterOptions = useMemo(() => {
+    return {
+      periode: filterMode,
+      weekNumber: selectedWeekNum,
+      startDate: startDate || undefined,
+      endDate: endDate || undefined
+    };
+  }, [filterMode, selectedWeekNum, startDate, endDate]);
 
-      switch (periode) {
-        case 'hari':
-          return txDateStr === todayStr;
-        case 'minggu': {
-          const oneWeekAgo = new Date();
-          oneWeekAgo.setDate(now.getDate() - 7);
-          return txDate >= oneWeekAgo && txDate <= now;
-        }
-        case 'bulan': {
-          const oneMonthAgo = new Date();
-          oneMonthAgo.setMonth(now.getMonth() - 1);
-          return txDate >= oneMonthAgo && txDate <= now;
-        }
-        case '3bulan': {
-          const threeMonthsAgo = new Date();
-          threeMonthsAgo.setMonth(now.getMonth() - 3);
-          return txDate >= threeMonthsAgo && txDate <= now;
-        }
-        case 'custom': {
-          if (!startDate && !endDate) return true;
-          let match = true;
-          if (startDate) {
-            const start = new Date(startDate);
-            start.setHours(0, 0, 0, 0);
-            match = match && txDate >= start;
-          }
-          if (endDate) {
-            const end = new Date(endDate);
-            end.setHours(23, 59, 59, 999);
-            match = match && txDate <= end;
-          }
-          return match;
-        }
-        default:
-          return true;
-      }
-    });
-  }, [projectTxs, periode, startDate, endDate]);
+  // SINGLE SOURCE OF TRUTH: currentReportData
+  const currentReportData: CurrentReportData | null = useMemo(() => {
+    if (!activeProj) return null;
+    return buildCurrentReportData(state, activeProj.id, filterOptions);
+  }, [state, activeProj, filterOptions]);
 
-  // 3. Filter transactions by Search Term & Category Filter
+  // Further filter transactions for on-screen list by Category & Search
   const filteredTxs = useMemo(() => {
-    return periodicTxs.filter(tx => {
-      // Category match
+    if (!currentReportData) return [];
+    return currentReportData.mutasiDana.filter(tx => {
+      // Category filter
       let matchCat = true;
       if (kategoriFilter !== 'Semua') {
         if (kategoriFilter === 'Dana Masuk') {
@@ -114,195 +86,21 @@ export const RekapView: React.FC = () => {
         }
       }
 
-      // Search term match
+      // Search term filter
       let matchSearch = true;
       if (searchTerm.trim()) {
         const query = searchTerm.toLowerCase();
         matchSearch =
           tx.sourceOrRecipient.toLowerCase().includes(query) ||
-          tx.notes.toLowerCase().includes(query) ||
+          (tx.notes && tx.notes.toLowerCase().includes(query)) ||
           tx.category.toLowerCase().includes(query);
       }
 
       return matchCat && matchSearch;
     });
-  }, [periodicTxs, kategoriFilter, searchTerm]);
+  }, [currentReportData, kategoriFilter, searchTerm]);
 
-  // --- Calculations based on filtered periodic transactions ---
-  const ringkasan = useMemo(() => {
-    let danaMasuk = 0;
-    let pengeluaran = 0;
-    let upahTukang = 0;
-    let pembelianMaterial = 0;
-
-    periodicTxs.forEach(t => {
-      if (t.type === 'DANA_MASUK') {
-        danaMasuk += t.amount;
-      } else {
-        pengeluaran += t.amount;
-        if (t.type === 'UPAH_TUKANG' || t.category === 'Upah Tukang') {
-          upahTukang += t.amount;
-        } else if (t.category === 'Material') {
-          pembelianMaterial += t.amount;
-        }
-      }
-    });
-
-    const saldo = danaMasuk - pengeluaran;
-
-    return {
-      danaMasuk,
-      pengeluaran,
-      upahTukang,
-      pembelianMaterial,
-      saldo
-    };
-  }, [periodicTxs]);
-
-  // Handle printing using browser dialog
-  const handlePrint = () => {
-    window.print();
-  };
-
-  // CSV Exporter
-  const handleDownloadCSV = () => {
-    if (!activeProj) return;
-
-    let csvContent = 'data:text/csv;charset=utf-8,';
-    csvContent += 'REKAP KEUANGAN PROYEK DATAKU\n';
-    csvContent += `Nama Proyek,${activeProj.name}\n`;
-    csvContent += `Periode,${periode === 'custom' ? `${startDate} s/d ${endDate}` : periode.toUpperCase()}\n\n`;
-    csvContent += 'RINGKASAN\n';
-    csvContent += `Total Dana Masuk,Rp ${ringkasan.danaMasuk}\n`;
-    csvContent += `Total Pengeluaran,Rp ${ringkasan.pengeluaran}\n`;
-    csvContent += `Total Upah Tukang,Rp ${ringkasan.upahTukang}\n`;
-    csvContent += `Total Material,Rp ${ringkasan.pembelianMaterial}\n`;
-    csvContent += `Saldo Kas,Rp ${ringkasan.saldo}\n\n`;
-    csvContent += 'DAFTAR TRANSAKSI\n';
-    csvContent += 'Tanggal,Jenis,Kategori,Keterangan,Sumber/Penerima,Nominal,Status\n';
-
-    filteredTxs.forEach(t => {
-      const formattedDate = t.date.substring(0, 10);
-      const sign = t.type === 'DANA_MASUK' ? '+' : '-';
-      csvContent += `"${formattedDate}","${t.type}","${t.category}","${t.notes.replace(/"/g, '""')}","${t.sourceOrRecipient.replace(/"/g, '""')}","${sign}${t.amount}","${t.status || 'Berhasil'}"\n`;
-    });
-
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    const pLabel = activeProj.name.replace(/\s+/g, '_');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `DATAKU_Rekap_Keuangan_${pLabel}_${periode}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  // Excel multi-sheet XML exporter
-  const handleDownloadExcel = () => {
-    if (!activeProj) return;
-
-    const pLabel = activeProj.name.replace(/\s+/g, '_');
-    const filename = `DATAKU_Rekap_Keuangan_${pLabel}_${periode}.xls`;
-
-    // Multi-sheet XML string
-    let xml = `<?xml version="1.0"?>
-<?mso-application progid="Excel.Sheet"?>
-<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
- xmlns:o="urn:schemas-microsoft-com:office:office"
- xmlns:x="urn:schemas-microsoft-com:office:excel"
- xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
- xmlns:html="http://www.w3.org/TR/REC-html40">
- <Styles>
-  <Style ss:ID="Default" ss:Name="Normal">
-   <Alignment ss:Vertical="Bottom"/>
-   <Borders/>
-   <Font ss:FontName="Calibri" x:Family="Swiss" ss:Size="11" ss:Color="#000000"/>
-   <Interior/>
-   <NumberFormat/>
-   <Protection/>
-  </Style>
-  <Style ss:ID="Header">
-   <Font ss:FontName="Calibri" ss:Size="12" ss:Bold="1" ss:Color="#FFFFFF"/>
-   <Interior ss:Color="#0F172A" ss:Pattern="Solid"/>
-  </Style>
-  <Style ss:ID="BoldText">
-   <Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1"/>
-  </Style>
- </Styles>
- <Worksheet ss:Name="Ringkasan">
-  <Table>
-   <Row><Cell ss:StyleID="BoldText"><Data ss:Type="String">REKAP GLOBAL PROYEK: ${activeProj.name}</Data></Cell></Row>
-   <Row><Cell><Data ss:Type="String">Periode: ${periode === 'custom' ? `${startDate} - ${endDate}` : periode.toUpperCase()}</Data></Cell></Row>
-   <Row></Row>
-   <Row ss:StyleID="Header">
-    <Cell><Data ss:Type="String">Sektor Keuangan</Data></Cell>
-    <Cell><Data ss:Type="String">Jumlah Nominal</Data></Cell>
-   </Row>
-   <Row>
-    <Cell><Data ss:Type="String">TOTAL DANA MASUK</Data></Cell>
-    <Cell><Data ss:Type="Number">${ringkasan.danaMasuk}</Data></Cell>
-   </Row>
-   <Row>
-    <Cell><Data ss:Type="String">TOTAL PENGELUARAN (OPERASIONAL + UPAH)</Data></Cell>
-    <Cell><Data ss:Type="Number">${ringkasan.pengeluaran}</Data></Cell>
-   </Row>
-   <Row>
-    <Cell><Data ss:Type="String">TOTAL UPAH TUKANG</Data></Cell>
-    <Cell><Data ss:Type="Number">${ringkasan.upahTukang}</Data></Cell>
-   </Row>
-   <Row>
-    <Cell><Data ss:Type="String">TOTAL PEMBELIAN MATERIAL</Data></Cell>
-    <Cell><Data ss:Type="Number">${ringkasan.pembelianMaterial}</Data></Cell>
-   </Row>
-   <Row ss:StyleID="BoldText">
-    <Cell><Data ss:Type="String">SALDO SISA KAS</Data></Cell>
-    <Cell><Data ss:Type="Number">${ringkasan.saldo}</Data></Cell>
-   </Row>
-  </Table>
- </Worksheet>
- <Worksheet ss:Name="Riwayat Transaksi">
-  <Table>
-   <Row ss:StyleID="Header">
-    <Cell><Data ss:Type="String">Tanggal</Data></Cell>
-    <Cell><Data ss:Type="String">Jenis</Data></Cell>
-    <Cell><Data ss:Type="String">Kategori</Data></Cell>
-    <Cell><Data ss:Type="String">Keterangan</Data></Cell>
-    <Cell><Data ss:Type="String">Sumber/Penerima</Data></Cell>
-    <Cell><Data ss:Type="String">Nominal</Data></Cell>
-    <Cell><Data ss:Type="String">Status</Data></Cell>
-   </Row>
-`;
-
-    filteredTxs.forEach(t => {
-      const formattedDate = t.date.substring(0, 10);
-      const signNum = t.type === 'DANA_MASUK' ? t.amount : -t.amount;
-      xml += `   <Row>
-    <Cell><Data ss:Type="String">${formattedDate}</Data></Cell>
-    <Cell><Data ss:Type="String">${t.type}</Data></Cell>
-    <Cell><Data ss:Type="String">${t.category}</Data></Cell>
-    <Cell><Data ss:Type="String">${t.notes}</Data></Cell>
-    <Cell><Data ss:Type="String">${t.sourceOrRecipient}</Data></Cell>
-    <Cell><Data ss:Type="Number">${signNum}</Data></Cell>
-    <Cell><Data ss:Type="String">${t.status || 'Berhasil'}</Data></Cell>
-   </Row>
-`;
-    });
-
-    xml += `  </Table>
- </Worksheet>
-</Workbook>`;
-
-    const blob = new Blob([xml], { type: 'application/vnd.ms-excel' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  if (!activeProj) {
+  if (!activeProj || !currentReportData) {
     return (
       <div className="text-center py-12 select-none">
         <div className="w-16 h-16 rounded-2xl bg-amber-100 border-2 border-[#0F172A] flex items-center justify-center text-3xl shadow-neo mx-auto mb-4">
@@ -316,6 +114,22 @@ export const RekapView: React.FC = () => {
     );
   }
 
+  const { ringkasan } = currentReportData;
+
+  const handleSyncToSheets = async () => {
+    setIsSyncingSheets(true);
+    setSyncSuccessMessage(null);
+    try {
+      const res = await syncReportToGoogleSheets(currentReportData);
+      setSyncSuccessMessage(res.message);
+      setTimeout(() => setSyncSuccessMessage(null), 5000);
+    } catch (e) {
+      alert('Gagal sinkronisasi data ke Google Sheets');
+    } finally {
+      setIsSyncingSheets(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* 1. Header & Proyek Aktif Info */}
@@ -325,79 +139,141 @@ export const RekapView: React.FC = () => {
             PROYEK: {activeProj.name}
           </span>
           <h2 className="text-xl font-chunky text-[#0F172A] uppercase mt-2">REKAP KEUANGAN PROYEK</h2>
+          <p className="text-xs font-bold text-[#64748B] uppercase mt-0.5">
+            Periode: <span className="text-[#0F172A]">{currentReportData.period.label}</span>
+          </p>
         </div>
 
-        {/* Export and Print actions */}
+        {/* Action Buttons: Unified Print, PDF, Excel, CSV, Google Sheets */}
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" size="sm" onClick={() => setShowPreviewModal(true)}>
-            <Printer className="w-4 h-4 mr-1.5" /> Preview Cetak
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setShowPreviewModal(true)}
+            className="shadow-neo-sm"
+          >
+            <Printer className="w-4 h-4 mr-1.5" /> Cetak / Save PDF
           </Button>
-          <Button variant="secondary" size="sm" onClick={handleDownloadExcel}>
-            <FileSpreadsheet className="w-4 h-4 mr-1.5 text-emerald-500" /> Ekspor Excel
+
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => exportReportToExcel(currentReportData)}
+            className="shadow-neo-sm"
+          >
+            <FileSpreadsheet className="w-4 h-4 mr-1.5 text-emerald-600" /> Ekspor Excel (5 Sheet)
           </Button>
-          <Button variant="ghost" size="sm" onClick={handleDownloadCSV}>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => exportReportToCSV(currentReportData)}
+            className="shadow-neo-sm"
+          >
             <FileDown className="w-4 h-4 mr-1.5 text-[#0284C7]" /> Ekspor CSV
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleSyncToSheets}
+            disabled={isSyncingSheets}
+            className="shadow-neo-sm bg-[#ECFDF5] text-emerald-800 border-emerald-600 hover:bg-[#D1FAE5]"
+          >
+            <span className="mr-1.5">📊</span> {isSyncingSheets ? 'Menyinkronkan...' : 'Sync Google Sheets'}
           </Button>
         </div>
       </div>
 
-      {/* 2. Ringkasan Finansial Card Row */}
+      {syncSuccessMessage && (
+        <div className="p-3 bg-[#D1FAE5] border-2 border-[#0F172A] rounded-xl flex items-center gap-2 text-xs font-bold text-emerald-900 shadow-neo-sm animate-fade-in select-all">
+          <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+          <span>{syncSuccessMessage}</span>
+        </div>
+      )}
+
+      {/* 2. Ringkasan Finansial Card Row (Derived directly from currentReportData) */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 select-none">
         <div className="bg-[#E0F2FE] border-2 border-[#0F172A] rounded-2xl p-4 shadow-neo">
-          <span className="text-[9px] font-extrabold text-[#0369A1] uppercase block mb-1">Penerimaan</span>
+          <span className="text-[9px] font-extrabold text-[#0369A1] uppercase block mb-1">Dana Masuk</span>
           <p className="text-lg font-chunky text-[#0F172A] truncate">{formatRupiah(ringkasan.danaMasuk)}</p>
           <TrendingUp className="w-4 h-4 text-emerald-600 mt-2" />
         </div>
 
-        <div className="bg-[#FAF8FF] border-2 border-[#0F172A] rounded-2xl p-4 shadow-neo">
-          <span className="text-[9px] font-extrabold text-[#64748B] uppercase block mb-1">Total Keluar</span>
-          <p className="text-lg font-chunky text-[#0F172A] truncate">{formatRupiah(ringkasan.pengeluaran)}</p>
-          <TrendingDown className="w-4 h-4 text-red-500 mt-2" />
+        <div className="bg-[#FEE2E2] border-2 border-[#0F172A] rounded-2xl p-4 shadow-neo">
+          <span className="text-[9px] font-extrabold text-[#B91C1C] uppercase block mb-1">Pengeluaran</span>
+          <p className="text-lg font-chunky text-red-600 truncate">{formatRupiah(ringkasan.pengeluaran)}</p>
+          <TrendingDown className="w-4 h-4 text-red-600 mt-2" />
         </div>
 
         <div className="bg-[#FEF3C7] border-2 border-[#0F172A] rounded-2xl p-4 shadow-neo">
           <span className="text-[9px] font-extrabold text-[#92400E] uppercase block mb-1">Upah Tukang</span>
-          <p className="text-lg font-chunky text-[#0F172A] truncate">{formatRupiah(ringkasan.upahTukang)}</p>
-          <Users className="w-4 h-4 text-amber-600 mt-2" />
+          <p className="text-lg font-chunky text-[#92400E] truncate">{formatRupiah(ringkasan.upahTukang)}</p>
+          <Users className="w-4 h-4 text-[#92400E] mt-2" />
         </div>
 
-        <div className="bg-[#FFF7ED] border-2 border-[#0F172A] rounded-2xl p-4 shadow-neo">
-          <span className="text-[9px] font-extrabold text-[#C2410C] uppercase block mb-1">Material</span>
-          <p className="text-lg font-chunky text-[#0F172A] truncate">{formatRupiah(ringkasan.pembelianMaterial)}</p>
-          <Layers className="w-4 h-4 text-orange-500 mt-2" />
+        <div className="bg-[#F1F5F9] border-2 border-[#0F172A] rounded-2xl p-4 shadow-neo">
+          <span className="text-[9px] font-extrabold text-[#475569] uppercase block mb-1">Bahan / Material</span>
+          <p className="text-lg font-chunky text-slate-800 truncate">{formatRupiah(ringkasan.pembelianMaterial)}</p>
+          <Layers className="w-4 h-4 text-slate-600 mt-2" />
         </div>
 
         <div className="col-span-2 lg:col-span-1 bg-[#D1FAE5] border-2 border-[#0F172A] rounded-2xl p-4 shadow-neo">
           <span className="text-[9px] font-extrabold text-[#065F46] uppercase block mb-1">Sisa Kas</span>
-          <p className="text-lg font-chunky text-emerald-700 truncate">{formatRupiah(ringkasan.saldo)}</p>
+          <p className="text-lg font-chunky text-emerald-700 truncate">{formatRupiah(ringkasan.saldoKas)}</p>
           <Wallet className="w-4 h-4 text-emerald-600 mt-2" />
         </div>
       </div>
 
-      {/* 3. Filters & Search Controls */}
+      {/* 3. Filters & Search Controls (Hari Ini, Minggu Ini, Bulan Ini, Minggu Proyek, Custom) */}
       <Card className="p-4 select-none">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-          {/* Period Selection */}
+          {/* Period Selection Mode */}
           <div>
-            <label className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wide block mb-1.5">Periode Laporan</label>
+            <label className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wide block mb-1.5">
+              Filter Periode
+            </label>
             <div className="relative">
               <select
-                value={periode}
-                onChange={(e) => setPeriode(e.target.value as any)}
+                value={filterMode}
+                onChange={(e) => setFilterMode(e.target.value as any)}
                 className="w-full bg-white border-2 border-[#0F172A] rounded-xl px-3.5 py-2 text-xs font-bold text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#0284C7] shadow-neo-sm appearance-none cursor-pointer"
               >
-                <option value="hari">Hari Ini</option>
-                <option value="minggu">Minggu Ini</option>
-                <option value="bulan">Bulan Ini</option>
-                <option value="3bulan">3 Bulan Terakhir</option>
-                <option value="custom">Custom Tanggal</option>
+                <option value="hari">📅 Hari Ini</option>
+                <option value="minggu">📆 7 Hari Terakhir</option>
+                <option value="bulan">🗓️ Bulan Ini</option>
+                <option value="project_week">👷 Pilih Minggu Proyek</option>
+                <option value="custom">🔍 Custom Tanggal</option>
               </select>
               <ChevronDown className="w-4 h-4 text-[#0F172A] absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
           </div>
 
-          {/* Custom Dates (Conditional) */}
-          {periode === 'custom' && (
+          {/* Conditional: Project Week Picker */}
+          {filterMode === 'project_week' && (
+            <div className="animate-fade-in">
+              <label className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wide block mb-1.5">
+                Pilih Minggu Proyek
+              </label>
+              <div className="relative">
+                <select
+                  value={selectedWeekNum}
+                  onChange={(e) => setSelectedWeekNum(Number(e.target.value))}
+                  className="w-full bg-white border-2 border-[#0F172A] rounded-xl px-3.5 py-2 text-xs font-bold text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#0284C7] shadow-neo-sm appearance-none cursor-pointer"
+                >
+                  {projectWeeks.map((pw) => (
+                    <option key={pw.weekNumber} value={pw.weekNumber}>
+                      {pw.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="w-4 h-4 text-[#0F172A] absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
+            </div>
+          )}
+
+          {/* Conditional: Custom Dates */}
+          {filterMode === 'custom' && (
             <div className="md:col-span-2 grid grid-cols-2 gap-2 animate-fade-in">
               <div>
                 <label className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wide block mb-1.5">Tanggal Mulai</label>
@@ -442,89 +318,145 @@ export const RekapView: React.FC = () => {
           </div>
 
           {/* Search Term */}
-          <div className={periode === 'custom' ? 'md:col-span-4' : 'md:col-span-2'}>
-            <label className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wide block mb-1.5">Pencarian Kata Kunci</label>
+          <div className={filterMode === 'custom' ? 'md:col-span-4' : 'md:col-span-1'}>
+            <label className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wide block mb-1.5">Cari Keterangan / Pihak</label>
             <div className="relative">
               <input
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Cari transaksi (e.g. semen, dana, Toko)..."
-                className="w-full bg-white border-2 border-[#0F172A] rounded-xl pl-10 pr-4 py-2 text-xs font-bold text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#0284C7] shadow-neo-sm"
+                placeholder="Cari transaksi..."
+                className="w-full bg-white border-2 border-[#0F172A] rounded-xl pl-9 pr-3.5 py-2 text-xs font-bold text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#0284C7] shadow-neo-sm"
               />
-              <Search className="w-4 h-4 text-[#64748B] absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <Search className="w-4 h-4 text-[#64748B] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
           </div>
         </div>
       </Card>
 
-      {/* 4. Transactions Ledger Table / Mobile cards */}
-      <Card className="overflow-hidden p-0">
-        <div className="px-5 py-4 border-b-2 border-[#0F172A] bg-white flex justify-between items-center select-none">
-          <span className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wider flex items-center gap-1.5">
-            <Info className="w-4 h-4 text-[#0284C7]" /> BUKU LOG TRANSAKSI ({filteredTxs.length})
+      {/* 4. Tabulasi / Section Preview Rings (Mutasi, Upah Mingguan, Material, Laporan Harian) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Rekap Upah Mingguan Mini Card */}
+        <div className="bg-amber-50/70 border-2 border-[#0F172A] rounded-2xl p-4 shadow-neo">
+          <div className="flex justify-between items-center mb-2">
+            <h4 className="font-chunky text-xs text-[#0F172A] uppercase">Upah Tenaga Kerja</h4>
+            <span className="text-[10px] font-extrabold text-amber-800 bg-amber-100 px-2 py-0.5 rounded border border-amber-300">
+              {currentReportData.rekapUpah.length} Tukang
+            </span>
+          </div>
+          <div className="space-y-1.5">
+            {currentReportData.rekapUpah.slice(0, 3).map((w, i) => (
+              <div key={i} className="flex justify-between items-center text-xs font-bold bg-white p-2 rounded-lg border border-[#0F172A]/20">
+                <span className="uppercase">{w.name} ({w.position})</span>
+                <span className={w.status === 'LUNAS' ? 'text-emerald-700' : 'text-red-600'}>
+                  {formatRupiah(w.totalWages)} • {w.status}
+                </span>
+              </div>
+            ))}
+            {currentReportData.rekapUpah.length === 0 && (
+              <p className="text-[11px] text-slate-500 italic py-2">Tidak ada data upah tukang di periode ini.</p>
+            )}
+          </div>
+        </div>
+
+        {/* Ringkasan Material Mini Card */}
+        <div className="bg-slate-50 border-2 border-[#0F172A] rounded-2xl p-4 shadow-neo">
+          <div className="flex justify-between items-center mb-2">
+            <h4 className="font-chunky text-xs text-[#0F172A] uppercase">Ringkasan Material</h4>
+            <span className="text-[10px] font-extrabold text-slate-700 bg-slate-200 px-2 py-0.5 rounded border border-slate-300">
+              {currentReportData.ringkasanMaterial.length} Item
+            </span>
+          </div>
+          <div className="space-y-1.5">
+            {currentReportData.ringkasanMaterial.slice(0, 3).map((m, i) => (
+              <div key={i} className="flex justify-between items-center text-xs font-bold bg-white p-2 rounded-lg border border-[#0F172A]/20">
+                <span className="uppercase">{m.materialName}</span>
+                <span className="text-slate-900 font-extrabold">Stok: {m.sisaStok} {m.unit}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Laporan Harian Mini Card */}
+        <div className="bg-blue-50/70 border-2 border-[#0F172A] rounded-2xl p-4 shadow-neo">
+          <div className="flex justify-between items-center mb-2">
+            <h4 className="font-chunky text-xs text-[#0F172A] uppercase">Laporan Harian Proyek</h4>
+            <span className="text-[10px] font-extrabold text-blue-800 bg-blue-100 px-2 py-0.5 rounded border border-blue-300">
+              {currentReportData.laporanHarian.length} Hari
+            </span>
+          </div>
+          <div className="space-y-1.5">
+            {currentReportData.laporanHarian.slice(0, 2).map((r, i) => (
+              <div key={i} className="text-xs bg-white p-2 rounded-lg border border-[#0F172A]/20">
+                <div className="flex justify-between font-bold text-[#0F172A]">
+                  <span>{formatTanggal(r.date)}</span>
+                  <span>{r.workerCount} Tukang • {r.weather}</span>
+                </div>
+                <p className="text-[11px] text-slate-600 truncate mt-0.5">{r.todayWork}</p>
+              </div>
+            ))}
+            {currentReportData.laporanHarian.length === 0 && (
+              <p className="text-[11px] text-slate-500 italic py-2">Belum ada laporan harian di periode ini.</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* 5. Tabel Mutasi Dana Transaksi */}
+      <Card className="overflow-hidden p-0 border-2 border-[#0F172A]">
+        <div className="p-4 bg-[#FAF8FF] border-b-2 border-[#0F172A] flex justify-between items-center select-none">
+          <h3 className="font-chunky text-sm text-[#0F172A] uppercase">
+            DAFTAR MUTASI DANA ({filteredTxs.length} Transaksi)
+          </h3>
+          <span className="text-[10px] font-extrabold text-[#64748B] uppercase">
+            {currentReportData.period.label}
           </span>
         </div>
 
         {/* Desktop Table */}
         <div className="hidden md:block overflow-x-auto select-text">
-          <table className="w-full border-collapse text-left text-xs font-semibold">
+          <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-[#FAF8FF] border-b-2 border-[#0F172A] text-[10px] font-extrabold uppercase tracking-wider text-[#64748B] select-none">
-                <th className="p-4">Tanggal</th>
-                <th className="p-4">Jenis</th>
-                <th className="p-4">Kategori</th>
-                <th className="p-4">Keterangan</th>
-                <th className="p-4">Sumber/Penerima</th>
-                <th className="p-4 text-right">Nominal</th>
-                <th className="p-4 text-center">Status</th>
-                <th className="p-4 text-center">Bukti</th>
+              <tr className="bg-[#F8FAFC] border-b-2 border-[#0F172A]/10 text-[10px] font-extrabold text-[#64748B] uppercase tracking-wider">
+                <th className="p-3">Tanggal</th>
+                <th className="p-3">Jenis</th>
+                <th className="p-3">Kategori</th>
+                <th className="p-3">Keterangan</th>
+                <th className="p-3">Sumber / Penerima</th>
+                <th className="p-3 text-right">Nominal</th>
+                <th className="p-3 text-center">Status</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#0F172A]/10">
+            <tbody className="divide-y divide-[#0F172A]/10 text-xs font-semibold">
               {filteredTxs.map((tx) => (
-                <tr key={tx.id} className="hover:bg-[#FAF8FF]/60 transition-colors">
-                  <td className="p-4 whitespace-nowrap font-bold text-[#0F172A]">{formatTanggal(tx.date)}</td>
-                  <td className="p-4">
-                    <span className={`px-2 py-1 rounded-lg font-extrabold text-[9px] border border-[#0f172a]/15 ${
+                <tr key={tx.id} className="hover:bg-[#FAF8FF] transition-colors">
+                  <td className="p-3 text-slate-600 whitespace-nowrap">{formatTanggal(tx.date)}</td>
+                  <td className="p-3">
+                    <span className={`px-2 py-0.5 rounded font-extrabold text-[9px] border border-[#0f172a]/15 ${
                       tx.type === 'DANA_MASUK' ? 'bg-[#D1FAE5] text-emerald-800' : 'bg-[#FEE2E2] text-red-800'
                     }`}>
-                      {tx.type === 'DANA_MASUK' ? 'DANA MASUK' : 'PENGELUARAN'}
+                      {tx.type}
                     </span>
                   </td>
-                  <td className="p-4 whitespace-nowrap font-extrabold text-[#475569]">{tx.category}</td>
-                  <td className="p-4 font-medium text-[#475569] max-w-[200px] truncate" title={tx.notes}>
-                    {tx.notes || '-'}
-                  </td>
-                  <td className="p-4 font-bold text-[#0F172A] uppercase">{tx.sourceOrRecipient}</td>
-                  <td className={`p-4 font-chunky text-right text-sm ${
+                  <td className="p-3 font-bold text-[#0F172A]">{tx.category}</td>
+                  <td className="p-3 text-[#475569] max-w-xs truncate italic">"{tx.notes || '-'}"</td>
+                  <td className="p-3 font-extrabold text-[#0F172A] uppercase">{tx.sourceOrRecipient}</td>
+                  <td className={`p-3 font-chunky text-right whitespace-nowrap ${
                     tx.type === 'DANA_MASUK' ? 'text-emerald-600' : 'text-red-500'
                   }`}>
                     {tx.type === 'DANA_MASUK' ? '+' : '-'} {formatRupiah(tx.amount)}
                   </td>
-                  <td className="p-4 text-center select-none">
-                    <span className="inline-block px-1.5 py-0.5 rounded-md bg-emerald-50 text-[10px] font-bold text-emerald-600 border border-emerald-300">
+                  <td className="p-3 text-center">
+                    <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 font-extrabold text-[9px] rounded border border-emerald-300">
                       {tx.status || 'Berhasil'}
                     </span>
-                  </td>
-                  <td className="p-4 text-center select-none">
-                    {tx.photos && tx.photos.length > 0 ? (
-                      <button
-                        onClick={() => alert(`Membuka lampiran gambar: ${tx.photos[0]}`)}
-                        className="text-[10px] font-bold text-[#0284C7] hover:underline cursor-pointer"
-                      >
-                        Lihat ({tx.photos.length})
-                      </button>
-                    ) : (
-                      <span className="text-slate-400">-</span>
-                    )}
                   </td>
                 </tr>
               ))}
 
               {filteredTxs.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="p-12 text-center text-slate-400 font-bold uppercase select-none">
+                  <td colSpan={7} className="p-12 text-center text-slate-400 font-bold uppercase select-none">
                     Tidak ada transaksi yang cocok dengan filter Anda.
                   </td>
                 </tr>
@@ -557,182 +489,24 @@ export const RekapView: React.FC = () => {
               </div>
 
               <p className="text-xs font-medium text-[#475569] italic">"{tx.notes || 'Tidak ada keterangan.'}"</p>
-
-              {tx.photos && tx.photos.length > 0 && (
-                <div className="flex gap-2.5 pt-1">
-                  {tx.photos.map((p, i) => (
-                    <div key={i} className="w-10 h-10 rounded border border-[#0F172A] overflow-hidden">
-                      <img src={p} alt="Bukti Lampiran" className="w-full h-full object-cover" />
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           ))}
 
           {filteredTxs.length === 0 && (
             <div className="p-12 text-center text-slate-400 font-bold uppercase select-none">
-              Tidak ada log transaksi.
+              Tidak ada log transaksi pada filter ini.
             </div>
           )}
         </div>
       </Card>
 
-      {/* 5. Printable A4 Laporan Preview Modal */}
+      {/* 6. Unified Print & PDF Preview Modal (Uses exact same currentReportData) */}
       {showPreviewModal && (
-        <div className="fixed inset-0 bg-[#0F172A]/80 flex items-center justify-center z-50 p-4 select-none animate-fade-in overflow-y-auto">
-          <div className="bg-white border-3 border-[#0F172A] rounded-2xl w-full max-w-4xl shadow-neo-lg overflow-hidden flex flex-col max-h-[90vh]">
-            {/* Modal Header */}
-            <div className="bg-[#FAF8FF] border-b-2 border-[#0F172A] p-4 flex justify-between items-center">
-              <h3 className="font-chunky text-base text-[#0F172A] uppercase">PREVIEW DOKUMEN REKAP KEUANGAN</h3>
-              <div className="flex gap-2">
-                <Button variant="secondary" size="sm" onClick={handlePrint}>
-                  <Printer className="w-4 h-4 mr-1.5" /> Cetak Laporan (A4)
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => setShowPreviewModal(false)}>
-                  Tutup
-                </Button>
-              </div>
-            </div>
-
-            {/* A4 Paper Container for scrolling print view */}
-            <div className="flex-1 overflow-y-auto p-6 md:p-10 bg-slate-100 flex justify-center">
-              {/* Paper styled document */}
-              <div id="printable-area" className="bg-white w-full max-w-[210mm] border-2 border-dashed border-slate-400 p-8 text-black font-sans leading-relaxed shadow-lg">
-                
-                {/* Print Layout Header */}
-                <div className="text-center space-y-1.5 border-b-4 border-double border-black pb-5">
-                  <h1 className="text-3xl font-black tracking-tight">DATAKU</h1>
-                  <h2 className="text-base font-extrabold uppercase tracking-widest text-slate-800">REKAP KEUANGAN PROYEK</h2>
-                  <p className="text-xs text-slate-500 uppercase tracking-wide">
-                    Sistem Manajemen Keuangan Mandor Lapangan Terintegrasi
-                  </p>
-                </div>
-
-                {/* Meta details */}
-                <div className="grid grid-cols-2 gap-4 py-5 text-xs font-semibold border-b border-slate-300">
-                  <div className="space-y-1">
-                    <p><span className="text-slate-500 uppercase font-bold">Proyek:</span> {activeProj.name}</p>
-                    <p><span className="text-slate-500 uppercase font-bold">Lokasi:</span> {activeProj.location}</p>
-                    <p><span className="text-slate-500 uppercase font-bold">Pemilik:</span> {activeProj.owner}</p>
-                  </div>
-                  <div className="space-y-1 text-right">
-                    <p><span className="text-slate-500 uppercase font-bold">Periode:</span> {periode === 'custom' ? `${formatTanggal(startDate)} s/d ${formatTanggal(endDate)}` : periode.toUpperCase()}</p>
-                    <p><span className="text-slate-500 uppercase font-bold">Tanggal Cetak:</span> {formatTanggal(new Date().toISOString())}</p>
-                    <p><span className="text-slate-500 uppercase font-bold">Oleh Mandor:</span> {state.currentUser?.name || 'PAUJI'}</p>
-                  </div>
-                </div>
-
-                {/* Ringkasan Box */}
-                <div className="my-6">
-                  <h3 className="text-sm font-extrabold uppercase tracking-wider mb-3">I. RINGKASAN REKAPITULASI</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3 bg-slate-50 border border-slate-300 rounded-lg p-4 font-bold text-xs">
-                    <div>
-                      <p className="text-slate-500 text-[10px] uppercase">Dana Masuk</p>
-                      <p className="text-emerald-700 font-extrabold mt-1">{formatRupiah(ringkasan.danaMasuk)}</p>
-                    </div>
-                    <div>
-                      <p className="text-slate-500 text-[10px] uppercase">Pengeluaran</p>
-                      <p className="text-red-600 font-extrabold mt-1">{formatRupiah(ringkasan.pengeluaran)}</p>
-                    </div>
-                    <div>
-                      <p className="text-slate-500 text-[10px] uppercase">Upah Tukang</p>
-                      <p className="text-[#92400E] font-extrabold mt-1">{formatRupiah(ringkasan.upahTukang)}</p>
-                    </div>
-                    <div>
-                      <p className="text-slate-500 text-[10px] uppercase">Bahan/Material</p>
-                      <p className="text-slate-700 font-extrabold mt-1">{formatRupiah(ringkasan.pembelianMaterial)}</p>
-                    </div>
-                    <div className="col-span-2 md:col-span-1 border-t md:border-t-0 md:border-l border-slate-300 pt-2.5 md:pt-0 md:pl-3">
-                      <p className="text-slate-500 text-[10px] uppercase">Sisa Kas</p>
-                      <p className="text-emerald-700 text-sm font-black mt-1">{formatRupiah(ringkasan.saldo)}</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Table Data */}
-                <div className="my-6">
-                  <h3 className="text-sm font-extrabold uppercase tracking-wider mb-3">II. DAFTAR MUTASI DANA</h3>
-                  <table className="w-full text-left text-[10px] font-medium border-collapse border border-slate-300">
-                    <thead>
-                      <tr className="bg-slate-100 border-b border-slate-300 text-[10px] font-bold uppercase text-slate-700">
-                        <th className="p-2 border border-slate-300">Tanggal</th>
-                        <th className="p-2 border border-slate-300">Jenis</th>
-                        <th className="p-2 border border-slate-300">Kategori</th>
-                        <th className="p-2 border border-slate-300">Keterangan</th>
-                        <th className="p-2 border border-slate-300">Sumber / Penerima</th>
-                        <th className="p-2 border border-slate-300 text-right">Nominal</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredTxs.map((t, index) => {
-                        const formattedDate = t.date.substring(0, 10);
-                        return (
-                          <tr key={index} className="border-b border-slate-200">
-                            <td className="p-2 border border-slate-300 whitespace-nowrap">{formattedDate}</td>
-                            <td className="p-2 border border-slate-300 uppercase font-semibold text-[9px]">{t.type}</td>
-                            <td className="p-2 border border-slate-300 uppercase">{t.category}</td>
-                            <td className="p-2 border border-slate-300 italic text-slate-600">{t.notes || '-'}</td>
-                            <td className="p-2 border border-slate-300 font-bold">{t.sourceOrRecipient}</td>
-                            <td className={`p-2 border border-slate-300 font-bold text-right ${t.type === 'DANA_MASUK' ? 'text-emerald-700' : 'text-red-600'}`}>
-                              {t.type === 'DANA_MASUK' ? '+' : '-'} {formatRupiah(t.amount)}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Signatures */}
-                <div className="mt-16 grid grid-cols-2 gap-12 text-center text-xs font-bold select-none">
-                  <div>
-                    <p className="mb-20">Mandor Proyek,</p>
-                    <p className="underline uppercase">{state.currentUser?.name || 'PAUJI'}</p>
-                    <p className="text-[10px] text-slate-500 font-semibold uppercase mt-0.5">DATAKU MANDOR SYSTEM</p>
-                  </div>
-                  <div>
-                    <p className="mb-20">Pengawas Lapangan,</p>
-                    <p className="underline">(.................................)</p>
-                    <p className="text-[10px] text-slate-500 font-semibold uppercase mt-0.5">PERWAKILAN PEMILIK</p>
-                  </div>
-                </div>
-
-                {/* Print Layout Footer */}
-                <div className="mt-12 pt-4 border-t border-slate-200 text-center text-[9px] text-slate-400 uppercase tracking-widest select-none">
-                  Dicetak melalui aplikasi DATAKU Mandor • Halaman 1 dari 1
-                </div>
-
-              </div>
-            </div>
-          </div>
-        </div>
+        <PrintPreviewModal
+          reportData={currentReportData}
+          onClose={() => setShowPreviewModal(false)}
+        />
       )}
-
-      {/* Print Specific CSS to support exact layout printing */}
-      <style>{`
-        @media print {
-          body * {
-            visibility: hidden;
-          }
-          #printable-area, #printable-area * {
-            visibility: visible;
-          }
-          #printable-area {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
-            border: none !important;
-            padding: 0 !important;
-            box-shadow: none !important;
-          }
-          aside, header, nav, button, .lg\\:pl-64 {
-            display: none !important;
-          }
-        }
-      `}</style>
-
     </div>
   );
 };

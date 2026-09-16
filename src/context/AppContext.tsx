@@ -4,6 +4,7 @@
  */
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { AppState, User, Project, Transaction, Material, MaterialLog, Worker, DailyReport, Notification, MaterialCategory } from '../types';
 import {
   initialCurrentUser,
@@ -24,6 +25,7 @@ interface AppContextType {
   setActiveProject: (id: string) => void;
   archiveProject: (id: string) => void;
   updateProject: (proj: Project) => void;
+  deleteProject: (id: string) => void;
   addDanaMasuk: (tx: { amount: number; category: string; sourceOrRecipient: string; paymentMethod: string; notes: string; photos: string[]; date: string }) => void;
   addPengeluaran: (tx: { amount: number; category: string; sourceOrRecipient: string; paymentMethod: string; notes: string; photos: string[]; date: string }) => void;
   addBarangMasuk: (log: { name: string; category: MaterialCategory; amount: number; unit: string; pricePerUnit: number; supplier: string; notes: string; photos: string[]; date: string; payWithProjectFunds: boolean }) => void;
@@ -38,6 +40,9 @@ interface AppContextType {
   triggerNotification: (message: string, type: 'WARNING' | 'ALERT' | 'INFO') => void;
   clearAllState: () => void;
   updateWorker: (worker: Worker) => void;
+  deleteWorker: (id: string) => void;
+  updateMaterial: (mat: Material) => void;
+  deleteMaterial: (id: string) => void;
   updateCurrentUser: (user: User) => void;
   restoreAllState: (newState: AppState) => void;
 }
@@ -86,6 +91,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (isAuthenticated) {
       loadedState.currentUser = {
+        id: `MDR-${loggedUser.toUpperCase().replace(/\s+/g, '')}`,
         name: loggedUser,
         photo: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?w=150&auto=format&fit=crop&q=80',
         phone: '0812-3456-7890',
@@ -106,6 +112,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setState(prev => ({
       ...prev,
       currentUser: {
+        id: `MDR-${username.toUpperCase().replace(/\s+/g, '')}`,
         name: username,
         photo: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?w=150&auto=format&fit=crop&q=80',
         phone: '0812-3456-7890',
@@ -191,6 +198,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       projects: prev.projects.map(p => p.id === proj.id ? proj : p)
     }));
+  };
+
+  const deleteProject = (id: string) => {
+    setState(prev => {
+      const updatedProjects = prev.projects.filter(p => p.id !== id);
+      const wasActive = prev.activeProjectId === id;
+      let nextActive = prev.activeProjectId;
+      if (wasActive) {
+        const remaining = updatedProjects.filter(p => !p.isArchived);
+        nextActive = remaining.length > 0 ? remaining[0].id : (updatedProjects.length > 0 ? updatedProjects[0].id : null);
+        updatedProjects.forEach(p => {
+          if (p.id === nextActive) p.isActive = true;
+        });
+      }
+
+      return {
+        ...prev,
+        projects: updatedProjects,
+        activeProjectId: nextActive,
+        transactions: prev.transactions.filter(t => t.projectId !== id),
+        materials: prev.materials.filter(m => m.projectId !== id),
+        materialLogs: prev.materialLogs.filter(ml => ml.projectId !== id),
+        workers: prev.workers.filter(w => w.projectId !== id),
+        dailyReports: prev.dailyReports.filter(dr => dr.projectId !== id),
+        notifications: prev.notifications.filter(n => n.projectId !== id)
+      };
+    });
+
+    const tryDeleteSupabase = async () => {
+      if (isSupabaseConfigured) {
+        try {
+          await supabase.from('projects').delete().eq('id', id);
+        } catch (dbErr) {
+          console.error('Failed to cascade delete project from Supabase:', dbErr);
+        }
+      }
+    };
+    tryDeleteSupabase();
   };
 
   // 1. ADD DANA MASUK
@@ -629,6 +674,61 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }));
   };
 
+  const deleteWorker = (id: string) => {
+    setState(prev => ({
+      ...prev,
+      workers: prev.workers.filter(w => w.id !== id)
+    }));
+
+    const tryDeleteSupabase = async () => {
+      if (isSupabaseConfigured) {
+        try {
+          await supabase.from('workers').delete().eq('id', id);
+        } catch (dbErr) {
+          console.error('Failed to delete worker from Supabase:', dbErr);
+        }
+      }
+    };
+    tryDeleteSupabase();
+  };
+
+  const updateMaterial = (updatedMat: Material) => {
+    setState(prev => ({
+      ...prev,
+      materials: prev.materials.map(m => m.id === updatedMat.id ? updatedMat : m)
+    }));
+
+    const tryUpdateSupabase = async () => {
+      if (isSupabaseConfigured) {
+        try {
+          await supabase.from('materials').update(updatedMat).eq('id', updatedMat.id);
+        } catch (dbErr) {
+          console.error('Failed to update material in Supabase:', dbErr);
+        }
+      }
+    };
+    tryUpdateSupabase();
+  };
+
+  const deleteMaterial = (id: string) => {
+    setState(prev => ({
+      ...prev,
+      materials: prev.materials.filter(m => m.id !== id),
+      materialLogs: prev.materialLogs.filter(l => l.materialId !== id)
+    }));
+
+    const tryDeleteSupabase = async () => {
+      if (isSupabaseConfigured) {
+        try {
+          await supabase.from('materials').delete().eq('id', id);
+        } catch (dbErr) {
+          console.error('Failed to delete material from Supabase:', dbErr);
+        }
+      }
+    };
+    tryDeleteSupabase();
+  };
+
   const updateCurrentUser = (user: User) => {
     setState(prev => ({
       ...prev,
@@ -651,6 +751,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setActiveProject,
         archiveProject,
         updateProject,
+        deleteProject,
         addDanaMasuk,
         addPengeluaran,
         addBarangMasuk,
@@ -665,6 +766,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         triggerNotification,
         clearAllState,
         updateWorker,
+        deleteWorker,
+        updateMaterial,
+        deleteMaterial,
         updateCurrentUser,
         restoreAllState
       }}

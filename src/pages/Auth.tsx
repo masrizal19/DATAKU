@@ -7,6 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Card, Button, Input, Toast } from '../components/Common';
 import { Sparkles } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 interface AuthProps {
   onAuthSuccess: () => void;
@@ -63,29 +64,76 @@ export const AuthScreen: React.FC<AuthProps> = ({ onAuthSuccess }) => {
       return;
     }
 
-    // Validasi akun demo / kustom yang telah diupdate di Pengaturan
-    const savedUsername = (localStorage.getItem('dataku_user') || 'PAUJI').toUpperCase().replace(/\s+/g, '');
-    const savedPin = localStorage.getItem('dataku_pin') || '1999';
+    const tryLogin = async () => {
+      try {
+        // 1. Connection test before login
+        const { error: testError } = await supabase.rpc('dataku_connection_test');
+        if (testError) {
+          console.error('Connection test error:', testError);
+          const errMessage = testError.message || JSON.stringify(testError);
+          if (errMessage.toLowerCase().includes('invalid api key')) {
+            setError('Konfigurasi koneksi database bermasalah.');
+            return;
+          }
+        }
 
-    if (trimmedUsername === savedUsername && trimmedPin === savedPin) {
-      // Login Berhasil
-      setSuccessToast(`Login berhasil. Selamat datang, ${trimmedUsername}!`);
-      
-      // Simpan session pada localStorage
-      localStorage.setItem('dataku_auth', 'true');
-      localStorage.setItem('dataku_user', trimmedUsername);
-      
-      // Update state di AppContext & trigger redirection
-      loginUser(trimmedUsername);
-      
-      // Biarkan user melihat toast sukses sejenak sebelum redirect
-      setTimeout(() => {
-        onAuthSuccess();
-      }, 1000);
-    } else {
-      // Login Gagal (tidak membeberkan detail mana yang salah)
-      setError('Username atau PIN salah.');
-    }
+        // 2. Perform RPC login_mandor
+        const { data, error: rpcError } = await supabase.rpc('login_mandor', {
+          p_username: trimmedUsername,
+          p_pin: trimmedPin
+        });
+
+        if (rpcError) {
+          console.error('RPC login_mandor error:', rpcError);
+          const errMessage = rpcError.message || JSON.stringify(rpcError);
+          if (errMessage.toLowerCase().includes('invalid api key')) {
+            setError('Konfigurasi koneksi database bermasalah.');
+            return;
+          }
+          setError('Username atau PIN salah.');
+          return;
+        }
+
+        // RPC returns true/success boolean or valid mandor object/list
+        const isSuccess = data && (data === true || (Array.isArray(data) && data.length > 0) || (typeof data === 'object' && Object.keys(data).length > 0));
+
+        if (isSuccess) {
+          let mandorId = 'demo-id';
+          let mandorName = trimmedUsername;
+          if (Array.isArray(data) && data[0]) {
+            mandorId = data[0].id || mandorId;
+            mandorName = data[0].full_name || data[0].username || mandorName;
+          } else if (typeof data === 'object') {
+            mandorId = (data as any).id || mandorId;
+            mandorName = (data as any).full_name || (data as any).username || mandorName;
+          }
+
+          setSuccessToast(`Login berhasil. Selamat datang, ${mandorName}!`);
+          
+          localStorage.setItem('dataku_auth', 'true');
+          localStorage.setItem('dataku_user', trimmedUsername);
+          localStorage.setItem('dataku_mandor_id', mandorId);
+          
+          loginUser(trimmedUsername);
+          
+          setTimeout(() => {
+            onAuthSuccess();
+          }, 1000);
+        } else {
+          setError('Username atau PIN salah.');
+        }
+      } catch (err: any) {
+        console.error('Login exception:', err);
+        const errMsg = err?.message || String(err);
+        if (errMsg.toLowerCase().includes('invalid api key')) {
+          setError('Konfigurasi koneksi database bermasalah.');
+        } else {
+          setError('Username atau PIN salah.');
+        }
+      }
+    };
+
+    tryLogin();
   };
 
   const handleLupaPin = () => {

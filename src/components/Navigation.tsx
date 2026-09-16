@@ -32,12 +32,16 @@ interface NavigationProps {
   onSearchChange?: (val: string) => void;
   searchValue?: string;
   onOpenNotifications?: () => void;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
 export const DesktopSidebar: React.FC<NavigationProps> = ({
   currentTab,
   setTab,
-  onProfileClick
+  onProfileClick,
+  isOpen = false,
+  onClose
 }) => {
   const { state, logoutUser } = useApp();
   const unreadNotifs = state.notifications.filter(n => !n.isRead).length;
@@ -55,152 +59,138 @@ export const DesktopSidebar: React.FC<NavigationProps> = ({
     { id: 'pengaturan', label: 'Pengaturan', icon: Settings }
   ];
 
+  const handleTabSelect = (tabId: string) => {
+    setTab(tabId);
+    if (onClose) {
+      onClose();
+    }
+  };
+
   return (
-    <aside className="hidden lg:flex flex-col w-64 h-screen fixed left-0 top-0 bg-white border-r-2.5 border-[#0F172A] z-40 p-5 select-none justify-between">
-      <div className="space-y-6">
-        {/* Wordmark logo */}
-        <div className="flex items-center gap-2.5 px-1 py-2">
-          <div className="w-10 h-10 rounded-xl bg-[#FBBF24] border-2 border-[#0F172A] shadow-neo-sm flex items-center justify-center font-chunky text-lg text-[#0F172A]">
-            🔨
+    <>
+      {/* Semi-transparent dark overlay backdrop behind the mobile drawer */}
+      {isOpen && (
+        <div 
+          onClick={onClose}
+          className="lg:hidden fixed inset-0 bg-[#0F172A]/70 z-45 animate-fade-in transition-opacity"
+        />
+      )}
+
+      <aside 
+        className={`fixed top-0 bottom-0 left-0 w-[280px] sm:w-[320px] lg:w-64 h-screen bg-white border-r-3 lg:border-r-2.5 border-[#0F172A] z-50 p-5 select-none justify-between flex flex-col transition-transform duration-300 ease-in-out lg:translate-x-0 lg:flex ${
+          isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        }`}
+      >
+        <div className="space-y-6">
+          {/* Logo & Close button row */}
+          <div className="flex items-center justify-between px-1 py-2">
+            <div className="flex items-center gap-2.5">
+              <div className="w-10 h-10 rounded-xl bg-[#FBBF24] border-2 border-[#0F172A] shadow-neo-sm flex items-center justify-center font-chunky text-lg text-[#0F172A]">
+                🔨
+              </div>
+              <div>
+                <h1 className="text-2xl font-chunky text-[#0F172A] leading-none tracking-tight">DATAKU</h1>
+                <span className="text-[9px] font-extrabold uppercase bg-[#38BDF8] text-[#0F172A] px-1.5 py-0.5 rounded border border-[#0F172A] mt-1 inline-block shadow-neo-sm">
+                  SISTEM MANDOR
+                </span>
+              </div>
+            </div>
+
+            {/* Mobile close button (✕) with touch target >= 44x44px */}
+            <button
+              onClick={onClose}
+              className="lg:hidden w-11 h-11 rounded-xl border-2 border-[#0F172A] bg-white hover:bg-slate-100 flex items-center justify-center font-extrabold text-sm cursor-pointer select-none"
+              aria-label="Tutup Menu"
+            >
+              ✕
+            </button>
           </div>
-          <div>
-            <h1 className="text-2xl font-chunky text-[#0F172A] leading-none tracking-tight">DATAKU</h1>
-            <span className="text-[9px] font-extrabold uppercase bg-[#38BDF8] text-[#0F172A] px-1.5 py-0.5 rounded border border-[#0F172A] mt-1 inline-block shadow-neo-sm">
-              SISTEM MANDOR
-            </span>
-          </div>
+
+          {/* Sidebar Menu */}
+          <nav className="space-y-1.5 overflow-y-auto max-h-[60vh] no-scrollbar">
+            {menuItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = currentTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => handleTabSelect(item.id)}
+                  className={`w-full flex items-center gap-3.5 px-4 py-3 rounded-xl border-2 transition-all font-bold text-sm cursor-pointer ${
+                    isActive
+                      ? 'bg-[#E0F2FE] text-[#0F172A] border-[#0F172A] shadow-neo-sm translate-x-[2px]'
+                      : 'bg-transparent text-[#475569] border-transparent hover:text-[#0F172A] hover:bg-[#F8FAFC]'
+                  }`}
+                >
+                  <div className="relative">
+                    <Icon className="w-4.5 h-4.5" />
+                    {item.badge && item.badge > 0 ? (
+                      <span className="absolute -top-1.5 -right-2 bg-red-500 text-white font-black text-[9px] rounded-full w-4 h-4 flex items-center justify-center border border-[#0F172A]">
+                        {item.badge}
+                      </span>
+                    ) : null}
+                  </div>
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </nav>
         </div>
 
-        {/* Sidebar Menu */}
-        <nav className="space-y-1.5">
-          {menuItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = currentTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => setTab(item.id)}
-                className={`w-full flex items-center gap-3.5 px-4 py-3 rounded-xl border-2 transition-all font-bold text-sm cursor-pointer ${
-                  isActive
-                    ? 'bg-[#E0F2FE] text-[#0F172A] border-[#0F172A] shadow-neo-sm translate-x-[2px]'
-                    : 'bg-transparent text-[#475569] border-transparent hover:text-[#0F172A] hover:bg-[#F8FAFC]'
-                }`}
-              >
-                <div className="relative">
-                  <Icon className="w-4.5 h-4.5" />
-                  {item.badge && item.badge > 0 ? (
-                    <span className="absolute -top-1.5 -right-2 bg-red-500 text-white font-black text-[9px] rounded-full w-4 h-4 flex items-center justify-center border border-[#0F172A]">
-                      {item.badge}
-                    </span>
-                  ) : null}
-                </div>
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
-        </nav>
-      </div>
-
-      {/* Profile summary & logout at bottom */}
-      <div className="border-t-2 border-[#F1F5F9] pt-4 space-y-3">
-        {state.currentUser ? (
-          <div
-            onClick={onProfileClick}
-            className="flex items-center gap-3 p-2 rounded-xl border-1.5 border-[#0F172A]/15 hover:border-[#0F172A] hover:bg-[#FAF8FF] cursor-pointer transition-all active:scale-98 select-none"
-          >
-            <div className="w-10 h-10 rounded-lg border border-[#0F172A] overflow-hidden bg-amber-100 flex items-center justify-center">
-              {state.currentUser.photo ? (
-                <img src={state.currentUser.photo} alt={state.currentUser.name} className="w-full h-full object-cover" />
-              ) : (
-                <User className="w-5 h-5 text-[#0F172A]" />
-              )}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-extrabold text-[#0F172A] truncate uppercase tracking-wider">{state.currentUser.name}</p>
-              <p className="text-[10px] text-[#64748B] font-semibold truncate">{state.currentUser.phone}</p>
-            </div>
-          </div>
-        ) : null}
-
-        <button
-          onClick={logoutUser}
-          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-500 transition-all font-bold text-xs cursor-pointer select-none"
-        >
-          <LogOut className="w-4 h-4" />
-          Keluar Sistem
-        </button>
-      </div>
-    </aside>
-  );
-};
-
-export const MobileBottomNav: React.FC<NavigationProps> = ({
-  currentTab,
-  setTab,
-  onQuickActionClick
-}) => {
-  const items = [
-    { id: 'beranda', label: 'Beranda', icon: Home },
-    { id: 'barang', label: 'Barang', icon: Layers },
-    { id: 'quick', label: 'Tambah', icon: Plus, isFab: true },
-    { id: 'keuangan', label: 'Keuangan', icon: DollarSign },
-    { id: 'lainnya', label: 'Lainnya', icon: Settings }
-  ];
-
-  return (
-    <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t-2.5 border-[#0F172A] z-40 shadow-[0_-3px_10px_rgba(15,23,42,0.06)] px-2.5 py-1.5 flex justify-between items-center select-none">
-      {items.map((item) => {
-        const Icon = item.icon;
-        const isActive = currentTab === item.id || (item.id === 'lainnya' && ['proyek', 'rekap', 'upah', 'laporan', 'kalkulator', 'notifikasi', 'pengaturan', 'profil'].includes(currentTab));
-        
-        if (item.isFab) {
-          return (
-            <button
-              key={item.id}
-              onClick={onQuickActionClick}
-              className="relative -top-5 bg-[#F59E0B] hover:bg-[#d97706] text-[#0F172A] border-2.5 border-[#0F172A] p-3.5 rounded-full shadow-neo active:translate-y-1 active:shadow-none cursor-pointer transition-all flex items-center justify-center focus:outline-none"
+        {/* Profile summary & logout at bottom */}
+        <div className="border-t-2 border-[#F1F5F9] pt-4 space-y-3">
+          {state.currentUser ? (
+            <div
+              onClick={() => {
+                handleTabSelect('pengaturan');
+                onProfileClick();
+              }}
+              className="flex items-center gap-3 p-2 rounded-xl border-1.5 border-[#0F172A]/15 hover:border-[#0F172A] hover:bg-[#FAF8FF] cursor-pointer transition-all active:scale-98 select-none"
             >
-              <Icon className="w-6 h-6 stroke-[3px]" />
-            </button>
-          );
-        }
-
-        return (
-          <button
-            key={item.id}
-            onClick={() => setTab(item.id === 'lainnya' ? 'pengaturan' : item.id)}
-            className="flex-1 flex flex-col items-center justify-center py-1.5 cursor-pointer focus:outline-none"
-          >
-            <div className={`p-1.5 rounded-xl border-1.5 flex items-center justify-center transition-all ${
-              isActive 
-                ? 'bg-[#E0F2FE] border-[#0F172A] text-[#0F172A] scale-105 shadow-neo-sm' 
-                : 'bg-transparent border-transparent text-[#64748B]'
-            }`}>
-              <Icon className="w-5 h-5" />
+              <div className="w-10 h-10 rounded-lg border border-[#0F172A] overflow-hidden bg-amber-100 flex items-center justify-center">
+                {state.currentUser.photo ? (
+                  <img src={state.currentUser.photo} alt={state.currentUser.name} className="w-full h-full object-cover" />
+                ) : (
+                  <User className="w-5 h-5 text-[#0F172A]" />
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-extrabold text-[#0F172A] truncate uppercase tracking-wider">{state.currentUser.name}</p>
+                <p className="text-[10px] text-[#64748B] font-semibold truncate">{state.currentUser.phone}</p>
+              </div>
             </div>
-            <span className={`text-[10px] font-bold mt-1 tracking-wide ${isActive ? 'text-[#0F172A]' : 'text-[#64748B]'}`}>
-              {item.label}
-            </span>
+          ) : null}
+
+          <button
+            onClick={() => {
+              logoutUser();
+              if (onClose) onClose();
+            }}
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-500 transition-all font-bold text-xs cursor-pointer select-none"
+          >
+            <LogOut className="w-4 h-4" />
+            Keluar Sistem
           </button>
-        );
-      })}
-    </div>
+        </div>
+      </aside>
+    </>
   );
 };
 
-// Global top header with Search & Active Project Selector
+// Global top header with Search, Active Project Selector & Hamburger Drawer Button
 interface HeaderBannerProps {
   currentTab: string;
   setTab: (tab: string) => void;
   onSearchChange: (val: string) => void;
   searchValue: string;
+  onOpenSidebar?: () => void;
 }
 
 export const HeaderBanner: React.FC<HeaderBannerProps> = ({
   currentTab,
   setTab,
   onSearchChange,
-  searchValue
+  searchValue,
+  onOpenSidebar
 }) => {
   const { state, setActiveProject } = useApp();
   const [showProjDrop, setShowProjDrop] = useState(false);
@@ -213,104 +203,183 @@ export const HeaderBanner: React.FC<HeaderBannerProps> = ({
   };
 
   return (
-    <header className="bg-white border-b-2 border-[#0F172A] p-4 flex flex-col md:flex-row gap-3.5 justify-between items-stretch md:items-center sticky top-0 z-30 select-none">
-      {/* Welcome & Project Selector */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-        <div>
-          <span className="text-[10px] text-[#64748B] font-extrabold uppercase tracking-widest leading-none">DATAKU MANDOR</span>
-          <h2 className="text-lg font-chunky text-[#0F172A] uppercase tracking-wide leading-tight">
-            {currentTab === 'beranda' ? `Selamat Datang, ${state.currentUser?.name || 'PAUJI'}!` : currentTab.toUpperCase()}
-          </h2>
+    <header className="bg-white border-b-2 border-[#0F172A] p-4 flex flex-col gap-3.5 sticky top-0 z-30 select-none">
+      {/* MOBILE-ONLY HEADER ROW (Logo left, [ ☰ ] right) */}
+      <div className="flex lg:hidden justify-between items-center w-full">
+        {/* Logo Left */}
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-lg bg-[#FBBF24] border border-[#0F172A] shadow-neo-sm flex items-center justify-center font-chunky text-xs text-[#0F172A]">
+            🔨
+          </div>
+          <div>
+            <h1 className="text-base font-chunky text-[#0F172A] leading-none tracking-tight">DATAKU</h1>
+            <span className="text-[7px] font-black uppercase bg-[#38BDF8] text-[#0F172A] px-1 py-0.25 rounded border border-[#0F172A] mt-0.5 inline-block leading-none">
+              SISTEM MANDOR
+            </span>
+          </div>
         </div>
 
-        {state.projects.length > 0 && activeProj ? (
-          <div className="relative">
-            <button
-              onClick={() => setShowProjDrop(!showProjDrop)}
-              className="flex items-center gap-2 px-3 py-1.5 bg-[#FAF8FF] border-2 border-[#0F172A] rounded-xl text-xs font-bold text-[#0f172a] shadow-neo-sm hover:bg-[#F1F5F9] active:translate-y-0.5 transition-all cursor-pointer select-none"
-            >
-              <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 border border-[#0F172A]" />
-              <span className="max-w-[150px] sm:max-w-[200px] truncate">{activeProj.name}</span>
-              <ChevronDown className="w-3.5 h-3.5 text-[#64748B]" />
-            </button>
-
-            {showProjDrop && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setShowProjDrop(false)} />
-                <div className="absolute top-full left-0 mt-1.5 bg-white border-2 border-[#0F172A] rounded-xl shadow-neo-lg z-20 w-64 overflow-hidden py-1.5 select-none">
-                  <div className="px-3 py-1.5 border-b border-[#F1F5F9] text-[9px] font-bold text-[#64748B] uppercase tracking-wider">
-                    PILIH PROYEK AKTIF
-                  </div>
-                  {state.projects.map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => handleProjectSelect(p.id)}
-                      className={`w-full text-left px-3 py-2 text-xs font-semibold flex items-center gap-2 hover:bg-[#FAF8FF] transition-colors cursor-pointer ${
-                        p.id === state.activeProjectId ? 'bg-[#E0F2FE] text-[#0284C7] font-bold' : 'text-[#0F172A]'
-                      }`}
-                    >
-                      <span className={`w-2 h-2 rounded-full ${p.isArchived ? 'bg-slate-400' : 'bg-emerald-500'}`} />
-                      <div className="flex-1 min-w-0">
-                        <p className="truncate font-bold leading-none">{p.name}</p>
-                        <p className="text-[9px] text-[#64748B] mt-1">{p.location}</p>
-                      </div>
-                    </button>
-                  ))}
-                  <div className="border-t border-[#F1F5F9] mt-1 px-1.5 pt-1.5">
-                    <button
-                      onClick={() => {
-                        setTab('proyek');
-                        setShowProjDrop(false);
-                      }}
-                      className="w-full text-center py-2 bg-[#F1F5F9] border border-[#0F172A] hover:bg-white text-[10px] font-bold rounded-lg cursor-pointer"
-                    >
-                      + Kelola Semua Proyek
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        ) : null}
+        {/* Hamburger Right [ ☰ ] with Touch Target >= 44x44px */}
+        <button
+          onClick={onOpenSidebar}
+          aria-label="Buka Menu"
+          className="w-11 h-11 rounded-xl border-2 border-[#0F172A] bg-[#FAF8FF] hover:bg-slate-100 flex items-center justify-center font-extrabold text-lg shadow-neo-sm cursor-pointer select-none transition-all active:translate-y-0.5 active:shadow-none"
+        >
+          ☰
+        </button>
       </div>
 
-      {/* Global Search & Notifications */}
-      <div className="flex items-center gap-3">
-        {/* Search Input bar */}
-        <div className="relative flex-1 md:w-64">
-          <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none select-none">
-            <Search className="w-4 h-4 text-[#64748B]" />
-          </span>
-          <input
-            type="text"
-            value={searchValue}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Cari barang, tukang, nota..."
-            className="w-full bg-[#FAF8FF] border-2 border-[#0F172A] rounded-xl pl-9.5 pr-3.5 py-1.5 text-xs font-bold text-[#0F172A] placeholder-[#64748B] focus:outline-none focus:border-[#0284C7] transition-all shadow-inner"
-          />
-          {searchValue && (
-            <button
-              onClick={() => onSearchChange('')}
-              className="absolute inset-y-0 right-0 flex items-center pr-3 text-xs font-extrabold text-[#64748B] hover:text-[#0F172A]"
-            >
-              ×
-            </button>
-          )}
+      {/* RESPONSIVE BANNER WORKSPACE ROW */}
+      <div className="flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3.5">
+        {/* Welcome & Project Selector */}
+        <div className="flex flex-row items-center justify-between md:justify-start gap-3 flex-wrap">
+          <div className="hidden lg:block">
+            <span className="text-[10px] text-[#64748B] font-extrabold uppercase tracking-widest leading-none">DATAKU MANDOR</span>
+            <h2 className="text-lg font-chunky text-[#0F172A] uppercase tracking-wide leading-tight mt-0.5">
+              {currentTab === 'beranda' ? `Selamat Datang, ${state.currentUser?.name || 'PAUJI'}!` : currentTab.toUpperCase()}
+            </h2>
+          </div>
+
+          <div className="lg:hidden text-xs font-black uppercase text-[#475569] tracking-wider">
+            Menu: {currentTab === 'beranda' ? 'Beranda' : currentTab === 'proyek' ? 'Proyek Saya' : currentTab === 'barang' ? 'Stok Barang' : currentTab === 'keuangan' ? 'Alur Keuangan' : currentTab === 'rekap' ? 'Rekap Keuangan' : currentTab === 'upah' ? 'Upah Tukang' : currentTab === 'laporan' ? 'Laporan Harian' : currentTab === 'kalkulator' ? 'Kalkulator' : currentTab === 'notifikasi' ? 'Notifikasi' : 'Pengaturan'}
+          </div>
+
+          {state.projects.length > 0 && activeProj ? (
+            <div className="relative">
+              <button
+                onClick={() => setShowProjDrop(!showProjDrop)}
+                className="flex items-center gap-2 px-3 py-1.5 bg-[#FAF8FF] border-2 border-[#0F172A] rounded-xl text-xs font-bold text-[#0f172a] shadow-neo-sm hover:bg-[#F1F5F9] active:translate-y-0.5 transition-all cursor-pointer select-none"
+              >
+                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 border border-[#0F172A]" />
+                <span className="max-w-[120px] sm:max-w-[200px] truncate">{activeProj.name}</span>
+                <ChevronDown className="w-3.5 h-3.5 text-[#64748B]" />
+              </button>
+
+              {showProjDrop && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setShowProjDrop(false)} />
+                  <div className="absolute top-full left-0 mt-1.5 bg-white border-2 border-[#0F172A] rounded-xl shadow-neo-lg z-20 w-64 overflow-hidden py-1.5 select-none">
+                    <div className="px-3 py-1.5 border-b border-[#F1F5F9] text-[9px] font-bold text-[#64748B] uppercase tracking-wider">
+                      PILIH PROYEK AKTIF
+                    </div>
+                    {state.projects.map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => handleProjectSelect(p.id)}
+                        className={`w-full text-left px-3 py-2 text-xs font-semibold flex items-center gap-2 hover:bg-[#FAF8FF] transition-colors cursor-pointer ${
+                          p.id === state.activeProjectId ? 'bg-[#E0F2FE] text-[#0284C7] font-bold' : 'text-[#0F172A]'
+                        }`}
+                      >
+                        <span className={`w-2 h-2 rounded-full ${p.isArchived ? 'bg-slate-400' : 'bg-emerald-500'}`} />
+                        <div className="flex-1 min-w-0">
+                          <p className="truncate font-bold leading-none">{p.name}</p>
+                          <p className="text-[9px] text-[#64748B] mt-1">{p.location}</p>
+                        </div>
+                      </button>
+                    ))}
+                    <div className="border-t border-[#F1F5F9] mt-1 px-1.5 pt-1.5">
+                      <button
+                        onClick={() => {
+                          setTab('proyek');
+                          setShowProjDrop(false);
+                        }}
+                        className="w-full text-center py-2 bg-[#F1F5F9] border border-[#0F172A] hover:bg-white text-[10px] font-bold rounded-lg cursor-pointer"
+                      >
+                        + Kelola Semua Proyek
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : null}
         </div>
 
-        {/* Notifications Icon with Badge counts */}
-        <button
-          onClick={() => setTab('notifikasi')}
-          className="relative p-2 rounded-xl bg-white border-2 border-[#0F172A] shadow-neo-sm hover:bg-[#FAF8FF] active:translate-y-0.5 transition-all cursor-pointer flex items-center justify-center focus:outline-none"
-        >
-          <Bell className="w-4 h-4 text-[#0F172A]" />
-          {unreadNotifs > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white font-black text-[9px] rounded-full w-4.5 h-4.5 flex items-center justify-center border border-[#0F172A] animate-bounce">
-              {unreadNotifs}
+        {/* Global Search & Notifications */}
+        <div className="flex items-center gap-3 w-full md:w-auto">
+          {/* Search Input bar */}
+          <div className="relative flex-1 md:w-64">
+            <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none select-none">
+              <Search className="w-4 h-4 text-[#64748B]" />
             </span>
-          )}
-        </button>
+            <input
+              type="text"
+              value={searchValue}
+              onChange={(e) => onSearchChange(e.target.value)}
+              placeholder="Cari barang, tukang, nota..."
+              className="w-full bg-[#FAF8FF] border-2 border-[#0F172A] rounded-xl pl-9.5 pr-3.5 py-1.5 text-xs font-bold text-[#0F172A] placeholder-[#64748B] focus:outline-none focus:border-[#0284C7] transition-all shadow-inner"
+            />
+            {searchValue && (
+              <button
+                onClick={() => onSearchChange('')}
+                className="absolute inset-y-0 right-0 flex items-center pr-3 text-xs font-extrabold text-[#64748B] hover:text-[#0F172A]"
+              >
+                ×
+              </button>
+            )}
+          </div>
+
+          {/* Notifications Icon with Badge counts */}
+          <button
+            onClick={() => setTab('notifikasi')}
+            className="relative p-2 rounded-xl bg-white border-2 border-[#0F172A] shadow-neo-sm hover:bg-[#FAF8FF] active:translate-y-0.5 transition-all cursor-pointer flex items-center justify-center focus:outline-none shrink-0"
+          >
+            <Bell className="w-4 h-4 text-[#0F172A]" />
+            {unreadNotifs > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white font-black text-[9px] rounded-full w-4.5 h-4.5 flex items-center justify-center border border-[#0F172A] animate-bounce">
+                {unreadNotifs}
+              </span>
+            )}
+          </button>
+        </div>
       </div>
     </header>
   );
 };
+
+export const MobileBottomNav: React.FC<NavigationProps> = ({
+  currentTab,
+  setTab
+}) => {
+  const items = [
+    { id: 'beranda', label: 'Beranda', icon: Home, matchTabs: ['beranda'] },
+    { id: 'proyek', label: 'Proyek', icon: Briefcase, matchTabs: ['proyek'] },
+    { id: 'barang', label: 'Stok', icon: Layers, matchTabs: ['barang'] },
+    { id: 'keuangan', label: 'Keuangan', icon: DollarSign, matchTabs: ['keuangan', 'rekap'] },
+    { id: 'upah', label: 'Upah', icon: Users, matchTabs: ['upah'] }
+  ];
+
+  return (
+    <div 
+      className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t-2.5 border-[#0F172A] z-45 px-2 pt-2 shadow-[0_-3px_10px_rgba(15,23,42,0.06)] select-none" 
+      style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 8px)' }}
+    >
+      <div className="flex justify-around items-center max-w-lg mx-auto">
+        {items.map((item) => {
+          const Icon = item.icon;
+          const isActive = item.matchTabs.includes(currentTab);
+
+          return (
+            <button
+              key={item.id}
+              onClick={() => setTab(item.id)}
+              className="flex-1 flex flex-col items-center justify-center py-1 cursor-pointer focus:outline-none"
+            >
+              <div className={`p-1.5 px-3 rounded-xl border-1.5 flex items-center justify-center transition-all ${
+                isActive 
+                  ? 'bg-[#E0F2FE] border-[#0F172A] text-[#0F172A] scale-105 shadow-neo-sm' 
+                  : 'bg-transparent border-transparent text-[#64748B]'
+              }`}>
+                <Icon className="w-5 h-5" />
+              </div>
+              <span className={`text-[10px] font-bold mt-1 tracking-wide ${isActive ? 'text-[#0F172A]' : 'text-[#64748B]'}`}>
+                {item.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+

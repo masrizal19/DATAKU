@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DATAKU - Manajemen Proyek & Keuangan Mandor</title>
+    <!-- Single Page Apps for GitHub Pages Redirect Script -->
+    <!-- MIT License: https://github.com/rafgraph/spa-github-pages -->
+    <script type="text/javascript">
+      (function() {
+        var l = window.location;
+        // Keep 1 path segment if on github.io (e.g. /dataku/), or 0 if on custom domain / localhost
+        var isGitHubPages = l.hostname.indexOf('github.io') !== -1;
+        var pathSegments = l.pathname.split('/').filter(Boolean);
+        var pathSegmentsToKeep = (isGitHubPages && pathSegments.length > 0) ? 1 : 0;
+
+        var repoPrefix = pathSegments.slice(0, pathSegmentsToKeep).join('/');
+        repoPrefix = repoPrefix ? '/' + repoPrefix : '';
+
+        var route = pathSegments.slice(pathSegmentsToKeep).join('/');
+
+        var query = route ? ('/' + route).replace(/&/g, '~and~') : '';
+        var search = l.search ? ('&' + l.search.slice(1).replace(/&/g, '~and~')) : '';
+
+        l.replace(
+          l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
+          repoPrefix + '/?' + query + search + l.hash
+        );
+      })();
+    </script>
+  </head>
+  <body style="margin: 0; padding: 40px; font-family: system-ui, -apple-system, sans-serif; background-color: #FAF8FF; color: #0F172A; text-align: center;">
+    <div style="max-width: 480px; margin: 60px auto; background: #ffffff; border: 3px solid #0F172A; border-radius: 16px; padding: 32px; box-shadow: 6px 6px 0px #0F172A;">
+      <h2 style="margin: 0 0 12px 0; font-size: 20px; text-transform: uppercase;">Memuat DATAKU...</h2>
+      <p style="margin: 0; font-size: 14px; color: #64748B; font-weight: bold;">Mengarahkan ke halaman yang diminta...</p>
+    </div>
+  </body>
+</html>

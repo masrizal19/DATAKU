@@ -5,7 +5,8 @@
 
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Card, Button, Badge, Modal, Input, TextArea } from '../components/Common';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { Card, Button, Badge, Modal, Input, TextArea, Select } from '../components/Common';
 import { formatRupiah, formatTanggal, formatTanggalWaktu } from '../utils/format';
 import { ProjectCalculator } from '../components/Calculator';
 import {
@@ -29,11 +30,23 @@ import {
   Clock,
   Briefcase,
   FileSpreadsheet,
-  FileDown
+  FileDown,
+  Printer
 } from 'lucide-react';
-import { Transaction, Material, MaterialLog, Worker, DailyReport, Project } from '../types';
+import { Transaction, Material, MaterialLog, Worker, DailyReport, Project, MaterialCategory, MasterWorker } from '../types';
+import { buildCurrentReportData, exportReportToExcel, exportReportToCSV } from '../utils/rekapEngine';
+import { PrintPreviewModal } from '../components/PrintPreviewModal';
+import {
+  loadGoogleSheetsConnection,
+  connectGoogleSheets,
+  disconnectGoogleSheets,
+  syncReportToGoogleSheets,
+  GoogleSheetsConnection
+} from '../services/googleSheetsService';
+import { getCurrentProjectWeek, getProjectWeeks } from '../utils/datetime';
+import { masterWorkersList } from '../mock/data';
 
-// --- VIEW 1: DASHBOARD VIEW ---
+/// --- VIEW 1: DASHBOARD VIEW ---
 interface DashboardViewProps {
   onQuickAction: (actionType: string) => void;
   setTab: (tab: string) => void;
@@ -79,24 +92,54 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const hasReportToday = state.dailyReports.some(r => r.projectId === activeProj.id && r.date === todayStr);
   const todayReport = state.dailyReports.find(r => r.projectId === activeProj.id && r.date === todayStr);
 
+  // Unpaid Wages Summary
+  const projectWorkers = state.workers.filter(w => w.projectId === activeProj.id);
+  const currentWeek = getCurrentProjectWeek(activeProj.startDate || '2026-09-01');
+  const activeWeekNum = currentWeek.weekNumber > 0 ? currentWeek.weekNumber : 2;
+  const currentWeekWorkers = projectWorkers.filter(w => (w.weekNumber === activeWeekNum) || (!w.weekNumber && activeWeekNum === 2));
+  const unpaidWorkersThisWeek = currentWeekWorkers.filter(w => w.status === 'BELUM_DIBAYAR' || w.status === 'SEBAGIAN');
+  const unpaidNamesThisWeek = unpaidWorkersThisWeek.map(w => w.name).join(', ');
+  const unpaidWorkersCount = projectWorkers.filter(w => w.status !== 'LUNAS').length;
+  const totalUnpaidWages = projectWorkers.filter(w => w.status !== 'LUNAS').reduce((acc, w) => acc + w.totalWages, 0);
+
   // Notifications summary
   const alertNotifs = state.notifications.filter(n => n.projectId === activeProj.id && !n.isRead);
 
   // Quick Action triggers mapping
   const quickActions = [
-    { label: '+ Dana Masuk', action: 'dana_masuk', color: 'bg-[#E0F2FE]' },
-    { label: '+ Barang Masuk', action: 'barang_masuk', color: 'bg-[#FEF3C7]' },
-    { label: '+ Barang Keluar', action: 'barang_keluar', color: 'bg-[#FAF8FF]' },
-    { label: '+ Barang Terpakai', action: 'barang_terpakai', color: 'bg-[#FEE2E2]' },
-    { label: '+ Pengeluaran', action: 'pengeluaran', color: 'bg-[#FFF7ED]' },
-    { label: '+ Upah Tukang', action: 'upah_tukang', color: 'bg-[#D1FAE5]' },
-    { label: '+ Laporan Harian', action: 'laporan_harian', color: 'bg-[#E0F2FE]' }
+    { label: '💰 DANA MASUK', action: 'dana_masuk', color: 'bg-[#E0F2FE]' },
+    { label: '📦 BARANG MASUK', action: 'barang_masuk', color: 'bg-[#FEF3C7]' },
+    { label: '📤 BARANG KELUAR', action: 'barang_keluar', color: 'bg-[#FAF8FF]' },
+    { label: '🛠️ BARANG TERPAKAI', action: 'barang_terpakai', color: 'bg-[#FEE2E2]' },
+    { label: '💸 PENGELUARAN', action: 'pengeluaran', color: 'bg-[#FFF7ED]' },
+    { label: '👷 BAYAR UPAH TUKANG', action: 'upah_tukang', color: 'bg-[#D1FAE5]' },
+    { label: '📝 LAPORAN HARIAN', action: 'laporan_harian', color: 'bg-[#E0F2FE]' }
   ];
 
   return (
     <div className="space-y-6">
-      {/* Saldo Proyek Summary */}
-      <Card variant="cyan" className="p-6 relative overflow-hidden">
+      {/* 1. BERANDA MOBILE — SAPAAN MANDOR */}
+      <div className="bg-[#FAF8FF] border-2 border-[#0F172A] rounded-2xl p-5 shadow-neo relative overflow-hidden select-none">
+        <div className="absolute right-4 top-4 text-3xl opacity-25 pointer-events-none select-none">
+          👷
+        </div>
+        <span className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-widest block mb-1">
+          SELAMAT DATANG,
+        </span>
+        <h2 className="text-3xl font-chunky text-[#0F172A] uppercase leading-tight">
+          HALO, {state.currentUser?.name || 'PAUJI'}!
+        </h2>
+        <p className="text-xs text-[#475569] font-bold mt-2 leading-normal uppercase">
+          Senang melihat Anda kembali. Mari catat aktivitas proyek hari ini.
+        </p>
+        <div className="mt-3 flex items-center gap-2 text-[10px] font-extrabold text-[#0284C7] uppercase">
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 border border-[#0F172A] animate-pulse" />
+          <span>PROYEK AKTIF: {activeProj.name}</span>
+        </div>
+      </div>
+
+      {/* 2. PROJECT AKTIF - SALDO KAS UTAMA */}
+      <Card variant="cyan" className="p-6 relative overflow-hidden select-none">
         <div className="absolute right-4 top-4 opacity-15 select-none pointer-events-none">
           <Wallet className="w-24 h-24 text-[#0284C7]" />
         </div>
@@ -171,9 +214,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               
               {hasReportToday && todayReport ? (
                 <div className="bg-[#D1FAE5] border-1.5 border-[#059669] rounded-xl p-4 space-y-2.5">
-                  <div className="flex items-center gap-2 text-[#065F46] font-bold text-sm">
+                  <div className="flex items-center gap-2 text-[#065F46] font-black text-xs uppercase tracking-wide">
                     <CheckCircle className="w-5 h-5 flex-shrink-0" />
-                    <span>✓ Laporan hari ini sudah dibuat</span>
+                    <span>✓ LAPORAN HARI INI SUDAH DIBUAT</span>
                   </div>
                   <div className="text-[11px] font-semibold text-[#065F46]/80 pl-7">
                     Cuaca: <span className="font-extrabold">{todayReport.weather}</span> <br />
@@ -182,10 +225,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </div>
                 </div>
               ) : (
-                <div className="bg-[#FEE2E2] border-1.5 border-[#EF4444] rounded-xl p-4 space-y-1.5">
-                  <div className="flex items-center gap-2 text-[#B91C1C] font-bold text-sm">
+                <div className="bg-[#FEE2E2] border-1.5 border-[#EF4444] rounded-xl p-4 space-y-2">
+                  <div className="flex items-center gap-2 text-[#B91C1C] font-black text-xs uppercase tracking-wide">
                     <AlertTriangle className="w-5 h-5 flex-shrink-0" />
-                    <span>Belum ada laporan hari ini</span>
+                    <span>⚠️ LAPORAN HARI INI BELUM DIBUAT</span>
                   </div>
                   <p className="text-[10px] font-semibold text-[#B91C1C]/80 pl-7 leading-normal">
                     Jangan lupa mencatat absensi tukang, cuaca, dan progress lapangan sebelum pulang pukul 18:00 WIB.
@@ -201,7 +244,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </Button>
               ) : (
                 <Button variant="secondary" fullWidth onClick={() => onQuickAction('laporan_harian')}>
-                  Buat Laporan Sekarang
+                  Buat Laporan
                 </Button>
               )}
             </div>
@@ -229,9 +272,34 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
+      {/* Alert Upah Minggu Ini Belum Dibayar */}
+      {unpaidWorkersThisWeek.length > 0 && (
+        <div className="p-4 bg-[#FEF2F2] border-2 border-[#EF4444] rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-neo select-none animate-bounce-subtle">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-[#DC2626] mt-0.5 shrink-0" />
+            <div>
+              <h4 className="text-xs font-black text-[#991B1B] uppercase tracking-wide">
+                ⚠️ Upah Minggu Ini Belum Dibayar: <span className="font-extrabold underline">{unpaidNamesThisWeek}</span>
+              </h4>
+              <p className="text-[11px] font-bold text-[#B91C1C] mt-0.5">
+                Sebanyak {unpaidWorkersThisWeek.length} tukang menunggu pelunasan upah kerja {currentWeek.label}.
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setTab('upah')}
+            className="text-[10px] py-1.5 px-3 bg-white hover:bg-slate-50 border-[#EF4444] text-[#DC2626] self-end sm:self-auto shrink-0 shadow-neo-sm"
+          >
+            Bayar Upah Sekarang
+          </Button>
+        </div>
+      )}
+
       {/* Stock warning banner if any item is menipis/habis */}
       {alertNotifs.length > 0 && (
-        <div className="p-4 bg-[#FFEDD5] border-2 border-[#F97316] rounded-2xl flex items-start gap-3 shadow-neo-sm select-none">
+        <div className="p-4 bg-[#FFEDD5] border-2 border-[#F97316] rounded-2xl flex items-start gap-3 shadow-neo-sm select-none animate-bounce-subtle">
           <AlertTriangle className="w-5 h-5 text-[#F97316] mt-0.5 flex-shrink-0" />
           <div className="flex-1">
             <h4 className="text-xs font-extrabold text-[#F97316] uppercase tracking-wider">Perhatian Mandor Lapangan:</h4>
@@ -246,6 +314,53 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </button>
         </div>
       )}
+
+      {/* Workers wage summary card */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 select-none">
+        <Card className="flex flex-col justify-between">
+          <div>
+            <span className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wider block mb-2">
+              RINGKASAN UPAH TUKANG
+            </span>
+            <h3 className="text-lg font-chunky text-[#0F172A] uppercase mb-3">Tanggungan Pembayaran</h3>
+            <div className="space-y-2">
+              <div className="flex justify-between items-center bg-[#F1F5F9] p-3 rounded-xl border border-[#0F172A]/10 text-xs font-bold">
+                <span className="text-[#64748B] uppercase">Tukang Belum Lunas</span>
+                <span className="text-[#0F172A] bg-amber-100 px-2.5 py-0.5 rounded border border-[#0F172A]">{unpaidWorkersCount} Orang</span>
+              </div>
+              <div className="flex justify-between items-center bg-[#F1F5F9] p-3 rounded-xl border border-[#0F172A]/10 text-xs font-bold">
+                <span className="text-[#64748B] uppercase">Total Sisa Upah</span>
+                <span className="text-[#B91C1C] font-chunky text-sm">{formatRupiah(totalUnpaidWages)}</span>
+              </div>
+            </div>
+          </div>
+          <div className="mt-4">
+            <Button variant="ghost" fullWidth onClick={() => setTab('upah')}>
+              Kelola Pembayaran Upah
+            </Button>
+          </div>
+        </Card>
+
+        {/* Dynamic Project Info Box */}
+        <Card className="flex flex-col justify-between">
+          <div>
+            <span className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wider block mb-2">
+              INFORMASI PROYEK AKTIF
+            </span>
+            <h3 className="text-lg font-chunky text-[#0F172A] uppercase mb-3">{activeProj.name}</h3>
+            <div className="text-xs font-semibold text-[#475569] space-y-1.5 uppercase">
+              <p>📍 LOKASI: <span className="text-[#0F172A] font-bold">{activeProj.location}</span></p>
+              <p>📅 TANGGAL MULAI: <span className="text-[#0F172A] font-bold">{formatTanggal(activeProj.startDate)}</span></p>
+              <p>⏱️ STATUS: <span className="text-[#0284C7] font-extrabold bg-[#E0F2FE] border border-[#0F172A] px-2 py-0.5 rounded">SEDANG BERJALAN</span></p>
+            </div>
+          </div>
+          <div className="mt-4">
+            <Button variant="ghost" fullWidth onClick={() => setTab('proyek')}>
+              Ganti Proyek Aktif
+            </Button>
+          </div>
+        </Card>
+      </div>
 
       {/* Recent Activity Mini List */}
       <Card>
@@ -292,9 +407,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
 // --- VIEW 2: INVENTORY / BARANG VIEW ---
 export const InventoryView: React.FC = () => {
-  const { state, addBarangKeluar, addBarangTerpakai } = useApp();
+  const { state, addBarangKeluar, addBarangTerpakai, updateMaterial, deleteMaterial } = useApp();
   const activeProj = state.projects.find(p => p.id === state.activeProjectId);
   const [activeSubTab, setActiveSubTab] = useState<'stok' | 'riwayat'>('stok');
+
+  // Edit material state variables
+  const [editingMaterial, setEditingMaterial] = useState<Material | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editCategory, setEditCategory] = useState<MaterialCategory>('Semen');
+  const [editStock, setEditStock] = useState(0);
+  const [editUnit, setEditUnit] = useState('');
+  const [editMinStock, setEditMinStock] = useState(5);
 
   if (!activeProj) {
     return <div className="text-center py-8">Pilih proyek aktif terlebih dahulu.</div>;
@@ -308,6 +431,15 @@ export const InventoryView: React.FC = () => {
   const totalMasuk = projLogs.filter(l => l.type === 'MASUK').reduce((acc, c) => acc + c.amount, 0);
   const totalTerpakai = projLogs.filter(l => l.type === 'TERPAKAI').reduce((acc, c) => acc + c.amount, 0);
   const totalStok = projMaterials.reduce((acc, c) => acc + c.stock, 0);
+
+  const handleEditMaterialClick = (m: Material) => {
+    setEditingMaterial(m);
+    setEditName(m.name);
+    setEditCategory(m.category);
+    setEditStock(m.stock);
+    setEditUnit(m.unit);
+    setEditMinStock(m.minStock);
+  };
 
   return (
     <div className="space-y-6">
@@ -352,55 +484,138 @@ export const InventoryView: React.FC = () => {
       </div>
 
       {activeSubTab === 'stok' ? (
-        <Card className="p-0 overflow-hidden">
-          <div className="overflow-x-auto no-scrollbar">
-            <table className="w-full text-left border-collapse select-none">
-              <thead>
-                <tr className="bg-[#FAF8FF] border-b-2 border-[#0F172A] text-xs font-extrabold uppercase text-[#475569] tracking-wider">
-                  <th className="p-4">Material / Barang</th>
-                  <th className="p-4">Kategori</th>
-                  <th className="p-4">Stok Saat Ini</th>
-                  <th className="p-4">Status Stok</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#F1F5F9] text-sm font-semibold text-[#0F172A]">
-                {projMaterials.map((m) => {
-                  let badgeType: 'success' | 'warning' | 'danger' = 'success';
-                  let statusText = 'AMAN';
-                  if (m.stock === 0) {
-                    badgeType = 'danger';
-                    statusText = 'HABIS';
-                  } else if (m.stock <= m.minStock) {
-                    badgeType = 'warning';
-                    statusText = 'MENIPIS';
-                  }
-                  
-                  return (
-                    <tr key={m.id} className="hover:bg-[#FAF8FF] transition-colors">
-                      <td className="p-4">
-                        <p className="font-extrabold">{m.name}</p>
-                        <p className="text-[10px] text-[#64748B] font-bold uppercase tracking-wider">{m.id}</p>
-                      </td>
-                      <td className="p-4 uppercase text-xs font-extrabold text-[#475569]">{m.category}</td>
-                      <td className="p-4 font-chunky text-[#0F172A]">{m.stock} {m.unit}</td>
-                      <td className="p-4">
-                        <Badge type={badgeType}>{statusText}</Badge>
-                      </td>
+        <>
+          {/* Desktop view table (hidden on mobile, shown on md and larger) */}
+          <div className="hidden md:block">
+            <Card className="p-0 overflow-hidden">
+              <div className="overflow-x-auto no-scrollbar">
+                <table className="w-full text-left border-collapse select-none">
+                  <thead>
+                    <tr className="bg-[#FAF8FF] border-b-2 border-[#0F172A] text-xs font-extrabold uppercase text-[#475569] tracking-wider">
+                      <th className="p-4">Material / Barang</th>
+                      <th className="p-4">Kategori</th>
+                      <th className="p-4">Stok Saat Ini</th>
+                      <th className="p-4">Status Stok</th>
+                      <th className="p-4 text-right">Aksi</th>
                     </tr>
-                  );
-                })}
+                  </thead>
+                  <tbody className="divide-y divide-[#F1F5F9] text-sm font-semibold text-[#0F172A]">
+                    {projMaterials.map((m) => {
+                      let badgeType: 'success' | 'warning' | 'danger' = 'success';
+                      let statusText = 'AMAN';
+                      if (m.stock === 0) {
+                        badgeType = 'danger';
+                        statusText = 'HABIS';
+                      } else if (m.stock <= m.minStock) {
+                        badgeType = 'warning';
+                        statusText = 'MENIPIS';
+                      }
+                      
+                      return (
+                        <tr key={m.id} className="hover:bg-[#FAF8FF] transition-colors">
+                          <td className="p-4">
+                            <p className="font-extrabold">{m.name}</p>
+                            <p className="text-[10px] text-[#64748B] font-bold uppercase tracking-wider">{m.id}</p>
+                          </td>
+                          <td className="p-4 uppercase text-xs font-extrabold text-[#475569]">{m.category}</td>
+                          <td className="p-4 font-chunky text-[#0F172A]">{m.stock} {m.unit}</td>
+                          <td className="p-4">
+                            <Badge type={badgeType}>{statusText}</Badge>
+                          </td>
+                          <td className="p-4 text-right">
+                            <div className="flex gap-2 justify-end">
+                              <button
+                                onClick={() => handleEditMaterialClick(m)}
+                                className="px-2.5 py-1 text-xs font-bold border border-[#0F172A] bg-white hover:bg-slate-100 rounded-lg cursor-pointer"
+                              >
+                                ✏️ Edit
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (confirm(`Apakah Anda yakin ingin menghapus material "${m.name}"?`)) {
+                                    deleteMaterial(m.id);
+                                  }
+                                }}
+                                className="px-2.5 py-1 text-xs font-bold border border-red-500 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg cursor-pointer"
+                              >
+                                🗑️ Hapus
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
 
-                {projMaterials.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="p-8 text-center text-xs font-bold text-[#64748B] uppercase">
-                      ⚠️ Belum ada material terdaftar di gudang proyek ini.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                    {projMaterials.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="p-8 text-center text-xs font-bold text-[#64748B] uppercase">
+                          ⚠️ Belum ada material terdaftar di gudang proyek ini.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
           </div>
-        </Card>
+
+          {/* Mobile view cards (shown on mobile, hidden on md and larger) */}
+          <div className="block md:hidden space-y-3">
+            {projMaterials.map((m) => {
+              let badgeType: 'success' | 'warning' | 'danger' = 'success';
+              let statusText = 'AMAN';
+              if (m.stock === 0) {
+                badgeType = 'danger';
+                statusText = 'HABIS';
+              } else if (m.stock <= m.minStock) {
+                badgeType = 'warning';
+                statusText = 'MENIPIS';
+              }
+
+              return (
+                <Card key={m.id} className="p-4 space-y-3">
+                  <div className="flex justify-between items-start gap-2">
+                    <div>
+                      <p className="font-extrabold text-[#0F172A]">{m.name}</p>
+                      <p className="text-[10px] text-[#64748B] font-bold uppercase tracking-wider">{m.id} • {m.category}</p>
+                    </div>
+                    <Badge type={badgeType}>{statusText}</Badge>
+                  </div>
+
+                  <div className="flex justify-between items-center bg-[#FAF8FF] border border-[#0F172A]/10 p-2.5 rounded-xl">
+                    <span className="text-xs text-slate-500 font-bold">Stok Saat Ini:</span>
+                    <span className="font-chunky text-sm text-[#0F172A]">{m.stock} {m.unit}</span>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleEditMaterialClick(m)}
+                      className="flex-1 py-2.5 text-xs font-bold border border-[#0F172A] bg-white hover:bg-slate-100 rounded-xl cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      ✏️ Edit
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (confirm(`Apakah Anda yakin ingin menghapus material "${m.name}"?`)) {
+                          deleteMaterial(m.id);
+                        }
+                      }}
+                      className="flex-1 py-2.5 text-xs font-bold border border-red-500 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      🗑️ Hapus
+                    </button>
+                  </div>
+                </Card>
+              );
+            })}
+
+            {projMaterials.length === 0 && (
+              <div className="text-center py-10 bg-white border-2 border-dashed border-[#0F172A]/20 rounded-2xl p-6 select-none">
+                <p className="text-xs font-bold text-[#64748B] uppercase">⚠️ Belum ada material terdaftar.</p>
+              </div>
+            )}
+          </div>
+        </>
       ) : (
         /* MATERIAL LOGS */
         <div className="space-y-3.5 select-none">
@@ -450,7 +665,7 @@ export const InventoryView: React.FC = () => {
                   <div className="flex gap-2.5 flex-wrap">
                     {log.photos.map((p, index) => (
                       <div key={index} className="w-16 h-16 rounded-xl border-1.5 border-[#0F172A] overflow-hidden bg-white shadow-neo-sm">
-                        <img src={p} alt="Dokumen Lapangan" className="w-full h-full object-cover" />
+                        <img src={p} alt="Dokumen Lapangan" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                       </div>
                     ))}
                   </div>
@@ -464,6 +679,96 @@ export const InventoryView: React.FC = () => {
               Belum ada pencatatan keluar/masuk log material.
             </div>
           )}
+        </div>
+      )}
+
+      {/* EDIT MATERIAL MODAL */}
+      {editingMaterial && (
+        <div className="fixed inset-0 bg-[#0F172A]/70 flex items-center justify-center z-50 p-4 select-none animate-fade-in">
+          <div className="bg-white border-3 border-[#0F172A] rounded-2xl w-full max-w-md shadow-neo-lg overflow-hidden animate-slide-up">
+            <div className="bg-[#FAF8FF] border-b-2 border-[#0F172A] px-4 py-3 flex justify-between items-center">
+              <h5 className="font-chunky text-sm text-[#0F172A] uppercase tracking-wide">Edit Material Gudang</h5>
+              <button 
+                type="button"
+                onClick={() => setEditingMaterial(null)}
+                className="text-slate-500 hover:text-black font-extrabold text-xs cursor-pointer"
+              >
+                TUTUP
+              </button>
+            </div>
+            
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              updateMaterial({
+                ...editingMaterial,
+                name: editName,
+                category: editCategory,
+                stock: editStock,
+                unit: editUnit,
+                minStock: editMinStock
+              });
+              setEditingMaterial(null);
+            }} className="p-4 space-y-3">
+              <Input
+                label="Nama Material"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                required
+              />
+              
+              <Select
+                label="Kategori"
+                value={editCategory}
+                onChange={(e) => setEditCategory(e.target.value as any)}
+                options={[
+                  { value: 'Semen', label: 'Semen' },
+                  { value: 'Besi', label: 'Besi' },
+                  { value: 'Pasir', label: 'Pasir' },
+                  { value: 'Batu', label: 'Batu' },
+                  { value: 'Kayu', label: 'Kayu' },
+                  { value: 'Cat', label: 'Cat' },
+                  { value: 'Keramik', label: 'Keramik' },
+                  { value: 'Paku', label: 'Paku' },
+                  { value: 'Alat Kerja', label: 'Alat Kerja' },
+                  { value: 'Lainnya', label: 'Lainnya' }
+                ]}
+              />
+
+              <div className="grid grid-cols-2 gap-3">
+                <Input
+                  label="Stok"
+                  type="number"
+                  value={editStock}
+                  onChange={(e) => setEditStock(Number(e.target.value))}
+                  required
+                />
+                <Input
+                  label="Satuan"
+                  value={editUnit}
+                  onChange={(e) => setEditUnit(e.target.value)}
+                  placeholder="sak, kg, batang..."
+                  required
+                />
+              </div>
+
+              <Input
+                label="Batas Minimum Stok (Peringatan)"
+                type="number"
+                value={editMinStock}
+                onChange={(e) => setEditMinStock(Number(e.target.value))}
+                required
+              />
+
+              <div className="flex gap-2.5 pt-2">
+                <Button variant="ghost" fullWidth type="button" onClick={() => setEditingMaterial(null)}>
+                  Batal
+                </Button>
+                <Button variant="secondary" fullWidth type="submit">
+                  Simpan Perubahan
+                </Button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>
@@ -480,10 +785,13 @@ export const FinanceView: React.FC = () => {
   // States for confirmation delete
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
+  const [showPrintModal, setShowPrintModal] = useState(false);
 
   if (!activeProj) {
     return <div className="text-center py-8">Pilih proyek aktif terlebih dahulu.</div>;
   }
+
+  const currentReportData = buildCurrentReportData(state, activeProj.id, { periode: 'bulan' });
 
   const projectTxs = state.transactions.filter(t => t.projectId === activeProj.id);
   const totalDana = projectTxs.filter(t => t.type === 'DANA_MASUK').reduce((acc, c) => acc + c.amount, 0);
@@ -588,16 +896,18 @@ export const FinanceView: React.FC = () => {
                 <div className="border-t border-[#0F172A]/10 pt-1.5 text-right text-emerald-600 font-chunky">{formatRupiah(saldoProyek)}</div>
               </div>
 
-              {/* PDF/Excel Export Sim buttons */}
+              {/* PDF/Excel Export buttons */}
               <div className="flex gap-2 pt-2.5 select-none">
                 <button
-                  onClick={() => alert('Fitur Ekspor PDF sedang disiapkan untuk integrasi REST API!')}
+                  type="button"
+                  onClick={() => setShowPrintModal(true)}
                   className="flex-1 py-2 rounded-lg border-1.5 border-[#0F172A] bg-white hover:bg-[#F1F5F9] font-bold text-[10px] text-[#0F172A] flex items-center justify-center gap-1 cursor-pointer shadow-neo-sm transition-all"
                 >
-                  <FileDown className="w-3.5 h-3.5 text-red-600" /> Ekspor PDF
+                  <FileDown className="w-3.5 h-3.5 text-red-600" /> Cetak / Ekspor PDF
                 </button>
                 <button
-                  onClick={() => alert('Fitur Ekspor Excel sedang disiapkan untuk integrasi REST API!')}
+                  type="button"
+                  onClick={() => exportReportToExcel(currentReportData)}
                   className="flex-1 py-2 rounded-lg border-1.5 border-[#0F172A] bg-white hover:bg-[#F1F5F9] font-bold text-[10px] text-[#0F172A] flex items-center justify-center gap-1 cursor-pointer shadow-neo-sm transition-all"
                 >
                   <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" /> Ekspor Excel
@@ -709,6 +1019,14 @@ export const FinanceView: React.FC = () => {
           </div>
         </div>
       </Modal>
+
+      {/* Unified Print & PDF Export Modal */}
+      {showPrintModal && (
+        <PrintPreviewModal
+          reportData={currentReportData}
+          onClose={() => setShowPrintModal(false)}
+        />
+      )}
     </div>
   );
 };
@@ -721,7 +1039,7 @@ interface WorkersViewProps {
 }
 
 export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPayWorkerClick }) => {
-  const { state, updateWorker } = useApp();
+  const { state, updateWorker, deleteWorker, addWorker } = useApp();
   const activeProj = state.projects.find(p => p.id === state.activeProjectId);
 
   // States for Payroll / Receipt Modal Details
@@ -729,16 +1047,28 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
   const [editingWorker, setEditingWorker] = useState<Worker | null>(null);
   const [printSingleWorker, setPrintSingleWorker] = useState<Worker | null>(null);
   const [printAllWorkers, setPrintAllWorkers] = useState<boolean>(false);
+  const [selectedWeek, setSelectedWeek] = useState<number | 'all'>(2); // Default to current active week (Minggu 2)
+  const [showMasterWorkerModal, setShowMasterWorkerModal] = useState<boolean>(false);
+  
+  // Custom dropdown menu state for individual cards
+  const [activeMenuWorkerId, setActiveMenuWorkerId] = useState<string | null>(null);
 
   if (!activeProj) {
     return <div className="text-center py-8">Pilih proyek aktif terlebih dahulu.</div>;
   }
 
+  const projectWeeks = getProjectWeeks(activeProj.startDate || '2026-09-01', 6);
   const projWorkers = state.workers.filter(w => w.projectId === activeProj.id);
+  
+  // Filter workers based on selected week
+  const filteredWorkers = projWorkers.filter(w => {
+    if (selectedWeek === 'all') return true;
+    return (w.weekNumber === selectedWeek) || (!w.weekNumber && selectedWeek === 2);
+  });
 
-  // Derive granular stats for payroll
-  const totalTukang = projWorkers.length;
-  const totalHariKerja = projWorkers.reduce((acc, w) => acc + w.daysWorked, 0);
+  // Derive granular stats for payroll from filtered workers
+  const totalTukang = filteredWorkers.length;
+  const totalHariKerja = filteredWorkers.reduce((acc, w) => acc + w.daysWorked, 0);
   
   // Custom helper to calculate net wages
   const getNetWages = (w: Worker) => {
@@ -751,8 +1081,8 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
     return 0;
   };
 
-  const totalKewajiban = projWorkers.reduce((acc, w) => acc + getNetWages(w), 0);
-  const sudahDibayar = projWorkers.reduce((acc, w) => acc + getPaidAmount(w), 0);
+  const totalKewajiban = filteredWorkers.reduce((acc, w) => acc + getNetWages(w), 0);
+  const sudahDibayar = filteredWorkers.reduce((acc, w) => acc + getPaidAmount(w), 0);
   const belumDibayar = totalKewajiban - sudahDibayar;
 
   // Handle Edit Save
@@ -779,20 +1109,22 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
     let csv = 'data:text/csv;charset=utf-8,';
     csv += 'REKAP UPAH TUKANG DATAKU\n';
     csv += `Proyek,${activeProj.name}\n`;
+    csv += `Filter Minggu,${selectedWeek === 'all' ? 'Semua Minggu' : `Minggu ${selectedWeek}`}\n`;
     csv += `Total Tukang,${totalTukang}\n`;
     csv += `Total Hari Kerja,${totalHariKerja}\n`;
     csv += `Total Kewajiban,Rp ${totalKewajiban}\n`;
     csv += `Sudah Dibayar,Rp ${sudahDibayar}\n`;
     csv += `Belum Dibayar,Rp ${belumDibayar}\n\n`;
-    csv += 'Daftar Tukang,Posisi,Hari Kerja,Tarif Harian,Bonus,Potongan,Total Bersih,Status,Metode\n';
+    csv += 'Minggu,Nama Tukang,Posisi,Hari Kerja,Tarif Harian,Bonus,Potongan,Total Bersih,Status,Metode\n';
 
-    projWorkers.forEach(w => {
-      csv += `"${w.name}","${w.position}",${w.daysWorked},${w.dailyRate},${w.bonus || 0},${w.potongan || 0},${getNetWages(w)},"${w.status}","${w.paymentMethod || 'Tunai'}"\n`;
+    filteredWorkers.forEach(w => {
+      const wWeek = w.weekNumber ? `Minggu ${w.weekNumber}` : 'Minggu 2';
+      csv += `"${wWeek}","${w.name}","${w.position}",${w.daysWorked},${w.dailyRate},${w.bonus || 0},${w.potongan || 0},${getNetWages(w)},"${w.status}","${w.paymentMethod || 'Tunai'}"\n`;
     });
 
     const link = document.createElement('a');
     link.href = encodeURI(csv);
-    link.download = `DATAKU_Rekap_Upah_${activeProj.name.replace(/\s+/g, '_')}.csv`;
+    link.download = `DATAKU_Rekap_Upah_${activeProj.name.replace(/\s+/g, '_')}_M${selectedWeek}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -809,6 +1141,7 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
  <Worksheet ss:Name="Rekap Upah">
   <Table>
    <Row><Cell><Data ss:Type="String">REKAP UPAH TUKANG: ${activeProj.name}</Data></Cell></Row>
+   <Row><Cell><Data ss:Type="String">Filter: ${selectedWeek === 'all' ? 'Semua Minggu' : `Minggu ${selectedWeek}`}</Data></Cell></Row>
    <Row><Cell><Data ss:Type="String">Total Tukang: ${totalTukang}</Data></Cell></Row>
    <Row><Cell><Data ss:Type="String">Total Hari Kerja: ${totalHariKerja}</Data></Cell></Row>
    <Row><Cell><Data ss:Type="String">Total Kewajiban: ${totalKewajiban}</Data></Cell></Row>
@@ -816,6 +1149,7 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
    <Row><Cell><Data ss:Type="String">Belum Dibayar: ${belumDibayar}</Data></Cell></Row>
    <Row></Row>
    <Row>
+    <Cell><Data ss:Type="String">Minggu</Data></Cell>
     <Cell><Data ss:Type="String">Nama Tukang</Data></Cell>
     <Cell><Data ss:Type="String">Posisi</Data></Cell>
     <Cell><Data ss:Type="String">Hari Kerja</Data></Cell>
@@ -827,8 +1161,10 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
    </Row>
 `;
 
-    projWorkers.forEach(w => {
+    filteredWorkers.forEach(w => {
+      const wWeek = w.weekNumber ? `Minggu ${w.weekNumber}` : 'Minggu 2';
       xml += `   <Row>
+    <Cell><Data ss:Type="String">${wWeek}</Data></Cell>
     <Cell><Data ss:Type="String">${w.name}</Data></Cell>
     <Cell><Data ss:Type="String">${w.position}</Data></Cell>
     <Cell><Data ss:Type="Number">${w.daysWorked}</Data></Cell>
@@ -848,7 +1184,7 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
     const blob = new Blob([xml], { type: 'application/vnd.ms-excel' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `DATAKU_Rekap_Upah_${activeProj.name.replace(/\s+/g, '_')}.xls`;
+    link.download = `DATAKU_Rekap_Upah_${activeProj.name.replace(/\s+/g, '_')}_M${selectedWeek}.xls`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -862,10 +1198,10 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
     <div className="space-y-6">
       {/* 1. PUSAT REKAP UPAH */}
       <Card className="p-5 select-none bg-[#FAF8FF]">
-        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 border-b border-[#0f172a]/10 pb-4 mb-4">
+        <div className="flex flex-col lg:flex-row justify-between lg:items-center gap-4 border-b border-[#0f172a]/10 pb-4 mb-4">
           <div>
             <span className="text-[9px] font-extrabold text-[#64748B] uppercase tracking-wider block">Pusat Informasi</span>
-            <h3 className="text-base font-chunky text-[#0F172A] uppercase mt-1">REKAP GAJI & UPAH TUKANG</h3>
+            <h3 className="text-base font-chunky text-[#0F172A] uppercase mt-1">REKAP GAJI & UPAH TUKANG MINGGUAN</h3>
           </div>
           <div className="flex flex-wrap gap-2">
             <button
@@ -886,6 +1222,58 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
             >
               <FileDown className="w-3.5 h-3.5 text-orange-500" /> CSV
             </button>
+          </div>
+        </div>
+
+        {/* Weekly Period Selector Tabs */}
+        <div className="space-y-1.5 mb-4">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wider">
+              📅 PILIH MINGGU KERJA PROYEK:
+            </span>
+            <span className="text-[10px] text-sky-700 font-extrabold">
+              {selectedWeek === 'all' ? 'Menampilkan Semua Minggu' : `Minggu ${selectedWeek} Aktif`}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+            <button
+              type="button"
+              onClick={() => setSelectedWeek('all')}
+              className={`px-3 py-2 rounded-xl border-2 border-[#0F172A] text-xs font-black whitespace-nowrap transition-all cursor-pointer shadow-neo-sm ${
+                selectedWeek === 'all'
+                  ? 'bg-[#0F172A] text-white'
+                  : 'bg-white text-[#0F172A] hover:bg-slate-50'
+              }`}
+            >
+              📋 Semua Minggu ({projWorkers.length})
+            </button>
+            {projectWeeks.map((pw) => {
+              const countInWeek = projWorkers.filter(w => (w.weekNumber === pw.weekNumber) || (!w.weekNumber && pw.weekNumber === 2)).length;
+              const isSelected = selectedWeek === pw.weekNumber;
+              return (
+                <button
+                  key={pw.weekNumber}
+                  type="button"
+                  onClick={() => setSelectedWeek(pw.weekNumber)}
+                  className={`px-3 py-2 rounded-xl border-2 border-[#0F172A] text-xs font-black whitespace-nowrap transition-all cursor-pointer flex items-center gap-2 shadow-neo-sm ${
+                    isSelected
+                      ? 'bg-[#0284C7] text-white'
+                      : 'bg-white text-[#0F172A] hover:bg-slate-50'
+                  }`}
+                >
+                  <span>{pw.label}</span>
+                  <span className={`text-[10px] ${isSelected ? 'text-sky-100' : 'text-slate-500'}`}>({pw.dateRange})</span>
+                  <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black ${isSelected ? 'bg-white text-[#0284C7]' : 'bg-slate-200 text-[#0F172A]'}`}>
+                    {countInWeek}
+                  </span>
+                  {pw.isCurrent && (
+                    <span className="bg-emerald-500 text-white text-[8px] px-1.5 py-0.5 rounded-full font-black uppercase">
+                      Aktif
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -915,13 +1303,23 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
       </Card>
 
       {/* Roster Controls Row */}
-      <div className="flex justify-between items-center select-none">
-        <h4 className="text-sm font-chunky text-[#0F172A] uppercase">DAFTAR TENAGA KERJA ({totalTukang})</h4>
-        <div className="flex gap-2">
-          <Button variant="secondary" size="sm" onClick={onAddWorkerClick}>
+      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 select-none">
+        <h4 className="text-sm font-chunky text-[#0F172A] uppercase">
+          DAFTAR TENAGA KERJA ({totalTukang} PEKERJA{selectedWeek !== 'all' ? ` - MINGGU ${selectedWeek}` : ''})
+        </h4>
+        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowMasterWorkerModal(true)}
+            className="text-xs py-2 bg-purple-50 hover:bg-purple-100 border-purple-800 text-purple-900 font-extrabold"
+          >
+            👥 Database Master Tukang
+          </Button>
+          <Button variant="secondary" size="sm" onClick={onAddWorkerClick} className="text-xs py-2">
             + Tambah Pekerja
           </Button>
-          <Button variant="ghost" size="sm" onClick={onPayWorkerClick}>
+          <Button variant="ghost" size="sm" onClick={onPayWorkerClick} className="text-xs py-2">
             💰 Catat Bayar
           </Button>
         </div>
@@ -929,10 +1327,12 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
 
       {/* Roster Cards List */}
       <div className="space-y-3.5">
-        {projWorkers.map((w) => {
+        {filteredWorkers.map((w) => {
           let badgeType: 'success' | 'warning' | 'danger' = 'success';
           if (w.status === 'BELUM_DIBAYAR') badgeType = 'danger';
           else if (w.status === 'SEBAGIAN') badgeType = 'warning';
+
+          const workerWeek = w.weekNumber ? `Minggu ${w.weekNumber}` : 'Minggu 2';
 
           return (
             <Card key={w.id} className="p-4 hover:translate-y-[-1.5px] transition-all">
@@ -942,11 +1342,16 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
                     👷
                   </div>
                   <div>
-                    <h4 className="text-sm font-extrabold text-[#0F172A] uppercase">{w.name}</h4>
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm font-extrabold text-[#0F172A] uppercase">{w.name}</h4>
+                      <span className="px-2 py-0.5 rounded-md text-[9px] font-black bg-sky-100 text-sky-800 border border-sky-300">
+                        {workerWeek}
+                      </span>
+                    </div>
                     <p className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wide mt-0.5">
-                      {w.position} • {w.daysWorked} Hari Kerja
+                      {w.position} • {w.daysWorked} Hari Kerja {w.weekStartDate && w.weekEndDate ? `(${w.weekStartDate} s/d ${w.weekEndDate})` : ''}
                     </p>
-                    <p className="text-xs text-slate-500 font-bold mt-1.5 flex gap-3">
+                    <p className="text-xs text-slate-500 font-bold mt-1.5 flex flex-wrap gap-3">
                       <span>Tarif: {formatRupiah(w.dailyRate)}/hari</span>
                       {w.bonus && <span className="text-emerald-600 font-extrabold">Bonus: +{formatRupiah(w.bonus)}</span>}
                       {w.potongan && <span className="text-red-500 font-extrabold">Pot: -{formatRupiah(w.potongan)}</span>}
@@ -955,20 +1360,68 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
                 </div>
 
                 <div className="flex sm:flex-col justify-between items-end gap-2 shrink-0 select-none">
-                  <div className="text-right">
+                  <div className="text-right hidden sm:block">
                     <span className="text-[10px] text-[#64748B] font-bold block">Total Bersih</span>
                     <span className="font-chunky text-sm text-[#0F172A] block mt-0.5">{formatRupiah(getNetWages(w))}</span>
                   </div>
-                  <div className="flex items-center gap-2">
+                  
+                  {/* Small screen net wages summary */}
+                  <div className="flex justify-between items-center w-full sm:hidden border-t border-dashed border-[#0F172A]/10 pt-2 mt-1">
+                    <span className="text-[10px] text-[#64748B] font-bold">Total Bersih:</span>
+                    <span className="font-chunky text-xs text-[#0F172A]">{formatRupiah(getNetWages(w))}</span>
+                  </div>
+
+                  <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
                     <Badge type={badgeType}>
                       {w.status === 'BELUM_DIBAYAR' ? 'BELUM BAYAR' : w.status === 'SEBAGIAN' ? 'KASBON / SEBAGIAN' : '✓ LUNAS'}
                     </Badge>
                     <button
                       onClick={() => setSelectedWorker(w)}
-                      className="px-2.5 py-1 rounded-lg border border-[#0F172A] bg-white hover:bg-slate-100 font-extrabold text-[10px] transition-all cursor-pointer"
+                      className="px-2.5 py-1.5 rounded-lg border border-[#0F172A] bg-white hover:bg-slate-100 font-extrabold text-[10px] transition-all cursor-pointer"
                     >
-                      Lihat Detail
+                      👁️ Detail
                     </button>
+
+                    {/* Action Dropdown Menu Toggle for complete parity */}
+                    <div className="relative">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveMenuWorkerId(activeMenuWorkerId === w.id ? null : w.id);
+                        }}
+                        className="p-1 px-2.5 rounded-lg border-2 border-[#0F172A] bg-[#FAF8FF] hover:bg-slate-100 font-extrabold text-xs cursor-pointer select-none"
+                      >
+                        ⋮
+                      </button>
+                      
+                      {activeMenuWorkerId === w.id && (
+                        <>
+                          <div className="fixed inset-0 z-10" onClick={() => setActiveMenuWorkerId(null)} />
+                          <div className="absolute right-0 bottom-full sm:bottom-auto sm:top-full mt-1 bg-white border-2 border-[#0F172A] rounded-xl shadow-neo-lg z-20 w-44 overflow-hidden py-1">
+                            <button
+                              onClick={() => {
+                                setEditingWorker(w);
+                                setActiveMenuWorkerId(null);
+                              }}
+                              className="w-full text-left px-3 py-2.5 text-xs font-bold text-[#0F172A] hover:bg-[#FAF8FF] flex items-center gap-2 cursor-pointer"
+                            >
+                              📝 Edit Pekerja
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (confirm(`Apakah Anda yakin ingin menghapus pekerja ${w.name} secara permanen?`)) {
+                                  deleteWorker(w.id);
+                                }
+                                setActiveMenuWorkerId(null);
+                              }}
+                              className="w-full text-left px-3 py-2.5 text-xs font-bold text-red-600 hover:bg-red-50 flex items-center gap-2 cursor-pointer"
+                            >
+                              🗑️ Hapus Pekerja
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -976,9 +1429,17 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
           );
         })}
 
-        {projWorkers.length === 0 && (
-          <div className="text-center py-10 bg-white border-2 border-dashed border-[#0F172A]/20 rounded-2xl p-6 select-none animate-pulse">
-            <p className="text-xs font-bold text-[#64748B] uppercase">Belum ada data pekerja tukang terdaftar.</p>
+        {filteredWorkers.length === 0 && (
+          <div className="text-center py-10 bg-white border-2 border-dashed border-[#0F172A]/20 rounded-2xl p-6 select-none">
+            <p className="text-xs font-bold text-[#64748B] uppercase">
+              Tidak ada tukang yang terdaftar untuk {selectedWeek === 'all' ? 'proyek ini' : `Minggu ${selectedWeek}`}.
+            </p>
+            <button
+              onClick={() => setShowMasterWorkerModal(true)}
+              className="mt-3 px-3 py-1.5 bg-[#FAF8FF] border-2 border-[#0F172A] rounded-xl text-xs font-bold text-[#0284C7] hover:bg-sky-50 shadow-neo-sm cursor-pointer"
+            >
+              + Tugaskan Tukang dari Database Master
+            </button>
           </div>
         )}
       </div>
@@ -992,7 +1453,7 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
               <h4 className="font-chunky text-sm text-[#0F172A] uppercase">DETAIL PEMBAYARAN UPAH</h4>
               <button
                 onClick={() => setSelectedWorker(null)}
-                className="text-xs font-bold border border-slate-300 p-1 rounded hover:bg-slate-100 transition-all"
+                className="text-xs font-bold border border-slate-300 p-1 px-2.5 rounded hover:bg-slate-100 transition-all cursor-pointer"
               >
                 Tutup
               </button>
@@ -1056,13 +1517,24 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
                 </p>
               </div>
 
-              {/* Action Buttons inside detail */}
-              <div className="grid grid-cols-3 gap-2 pt-2">
+              {/* Action Buttons inside detail - Symmetrical Grid containing Hapus */}
+              <div className="grid grid-cols-2 gap-2 pt-2">
                 <button
                   onClick={() => { setEditingWorker(selectedWorker); }}
                   className="py-2.5 bg-white hover:bg-slate-50 border-2 border-[#0F172A] rounded-xl font-bold text-xs text-[#0F172A] transition-all cursor-pointer shadow-neo-sm flex items-center justify-center gap-1"
                 >
                   ⚙ Edit Slip
+                </button>
+                <button
+                  onClick={() => {
+                    if (confirm(`Apakah Anda yakin ingin menghapus pekerja ${selectedWorker.name} secara permanen?`)) {
+                      deleteWorker(selectedWorker.id);
+                      setSelectedWorker(null);
+                    }
+                  }}
+                  className="py-2.5 bg-red-50 hover:bg-red-100 border-2 border-red-500 rounded-xl font-bold text-xs text-red-600 transition-all cursor-pointer shadow-neo-sm flex items-center justify-center gap-1"
+                >
+                  🗑️ Hapus Pekerja
                 </button>
                 <button
                   onClick={() => { setPrintSingleWorker(selectedWorker); }}
@@ -1343,6 +1815,118 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
         </div>
       )}
 
+      {/* 4. MASTER WORKERS MODAL / DAFTAR TUKANG UTAMA */}
+      {showMasterWorkerModal && (
+        <div className="fixed inset-0 bg-[#0F172A]/70 flex items-center justify-center z-50 p-4 select-none animate-fade-in">
+          <div className="bg-white border-3 border-[#0F172A] rounded-2xl w-full max-w-xl shadow-neo-lg overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="bg-[#FAF8FF] border-b-2 border-[#0F172A] p-4 flex justify-between items-center">
+              <div>
+                <h4 className="font-chunky text-sm text-[#0F172A] uppercase">👥 DATABASE MASTER TUKANG</h4>
+                <p className="text-[10px] text-[#64748B] font-extrabold uppercase mt-0.5">
+                  Tugaskan tukang ke proyek untuk {selectedWeek === 'all' ? 'Minggu 2' : `Minggu ${selectedWeek}`}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowMasterWorkerModal(false)}
+                className="text-xs font-bold border border-slate-300 p-1 px-2.5 rounded hover:bg-slate-100 transition-all cursor-pointer"
+              >
+                ✕ Tutup
+              </button>
+            </div>
+
+            <div className="p-4 bg-sky-50 border-b border-[#0F172A]/10 flex items-center justify-between text-xs">
+              <span className="font-bold text-[#0F172A]">
+                🎯 Target Penugasan: <b className="text-sky-800 uppercase">{selectedWeek === 'all' ? 'Minggu 2' : `Minggu ${selectedWeek}`}</b>
+              </span>
+              <span className="text-[10px] text-[#64748B] font-extrabold">
+                {masterWorkersList.length} Tukang Terdaftar di Master
+              </span>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {masterWorkersList.map((mw) => {
+                const targetW = selectedWeek === 'all' ? 2 : selectedWeek;
+                const isAssigned = projWorkers.some(
+                  pw => (pw.masterWorkerId === mw.id || pw.name.toLowerCase() === mw.name.toLowerCase()) && 
+                        ((pw.weekNumber === targetW) || (!pw.weekNumber && targetW === 2))
+                );
+
+                return (
+                  <div
+                    key={mw.id}
+                    className={`p-3 rounded-xl border-2 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                      isAssigned
+                        ? 'bg-slate-50 border-slate-300 opacity-80'
+                        : 'bg-white border-[#0F172A] hover:shadow-neo-sm'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-amber-50 border border-[#0F172A] flex items-center justify-center text-lg shrink-0">
+                        👷
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h5 className="font-bold text-xs text-[#0F172A] uppercase">{mw.name}</h5>
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-slate-100 text-slate-700 border border-slate-300">
+                            {mw.specialty}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 font-bold mt-0.5">
+                          {mw.position} • {formatRupiah(mw.dailyRate)}/hari • {mw.phone}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="shrink-0 flex items-center justify-end">
+                      {isAssigned ? (
+                        <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-[10px] font-black uppercase">
+                          ✓ Sudah Ditugaskan
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const weekObj = projectWeeks.find(p => p.weekNumber === targetW);
+                            addWorker({
+                              name: mw.name,
+                              position: mw.position,
+                              dailyRate: mw.dailyRate,
+                              daysWorked: 6,
+                              status: 'BELUM_DIBAYAR',
+                              paymentMethod: 'Tunai',
+                              weekNumber: targetW,
+                              weekStartDate: weekObj?.startDate || '2026-09-08',
+                              weekEndDate: weekObj?.endDate || '2026-09-14',
+                              masterWorkerId: mw.id,
+                              notes: `Penugasan Master Tukang (${mw.specialty})`
+                            });
+                          }}
+                          className="px-3 py-1.5 bg-[#0284C7] hover:bg-sky-700 text-white rounded-lg text-xs font-extrabold transition-all cursor-pointer shadow-neo-sm flex items-center gap-1"
+                        >
+                          + Tugaskan Minggu {targetW}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="p-3 bg-slate-50 border-t-2 border-[#0F172A] flex justify-between items-center text-xs">
+              <span className="text-[10px] text-slate-500 font-bold">
+                Tukang berbeda setiap minggu dapat ditugaskan ke dalam proyek yang sama.
+              </span>
+              <button
+                onClick={() => setShowMasterWorkerModal(false)}
+                className="px-3 py-1 bg-white border border-[#0F172A] rounded-lg font-bold text-xs hover:bg-slate-100 cursor-pointer"
+              >
+                Selesai
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Print Specific CSS to support exact layout printing */}
       <style>{`
         @media print {
@@ -1508,7 +2092,67 @@ interface ProjectListViewProps {
 }
 
 export const ProjectListView: React.FC<ProjectListViewProps> = ({ onCreateProjectClick }) => {
-  const { state, setActiveProject, archiveProject } = useApp();
+  const { state, setActiveProject, archiveProject, updateProject, deleteProject } = useApp();
+
+  // Deletion state
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [typedConfirm, setTypedConfirm] = useState('');
+
+  // Editing state
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [projectToEdit, setProjectToEdit] = useState<Project | null>(null);
+  
+  // Edit form fields
+  const [editName, setEditName] = useState('');
+  const [editLocation, setEditLocation] = useState('');
+  const [editOwner, setEditOwner] = useState('');
+  const [editBudget, setEditBudget] = useState(0);
+  const [editStartDate, setEditStartDate] = useState('');
+  const [editTargetDate, setEditTargetDate] = useState('');
+
+  const handleOpenEdit = (p: Project) => {
+    setProjectToEdit(p);
+    setEditName(p.name);
+    setEditLocation(p.location);
+    setEditOwner(p.owner);
+    setEditBudget(p.budget);
+    setEditStartDate(p.startDate);
+    setEditTargetDate(p.targetDate);
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!projectToEdit) return;
+
+    updateProject({
+      ...projectToEdit,
+      name: editName,
+      location: editLocation,
+      owner: editOwner,
+      budget: Number(editBudget),
+      startDate: editStartDate,
+      targetDate: editTargetDate
+    });
+
+    setShowEditModal(false);
+    setProjectToEdit(null);
+  };
+
+  const handleOpenDelete = (p: Project) => {
+    setProjectToDelete(p);
+    setTypedConfirm('');
+    setShowDeleteModal(true);
+  };
+
+  const handleConfirmDelete = () => {
+    if (!projectToDelete || typedConfirm !== 'HAPUS') return;
+
+    deleteProject(projectToDelete.id);
+    setShowDeleteModal(false);
+    setProjectToDelete(null);
+  };
 
   return (
     <div className="space-y-6">
@@ -1532,7 +2176,7 @@ export const ProjectListView: React.FC<ProjectListViewProps> = ({ onCreateProjec
                 isActive ? 'bg-[#E0F2FE] border-[#0F172A] shadow-neo-lg' : 'bg-white hover:bg-[#FAF8FF]'
               }`}
             >
-              <div className="flex justify-between items-start gap-4">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
                 <div className="space-y-2.5 flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="text-base font-chunky text-[#0F172A] uppercase truncate">
@@ -1555,23 +2199,40 @@ export const ProjectListView: React.FC<ProjectListViewProps> = ({ onCreateProjec
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-2 select-none">
+                <div className="flex flex-row sm:flex-col gap-2 select-none flex-wrap">
                   {!isActive && !p.isArchived && (
                     <Button variant="ghost" size="sm" onClick={() => setActiveProject(p.id)}>
                       Buka Proyek
                     </Button>
                   )}
                   {isActive && (
-                    <span className="text-[10px] font-black text-emerald-600 border border-emerald-500 bg-emerald-50 rounded-lg px-2 py-1 uppercase text-center">
+                    <span className="text-[10px] font-black text-emerald-600 border border-emerald-500 bg-emerald-50 rounded-lg px-2 py-1 uppercase text-center block">
                       ✓ Sedang Dibuka
                     </span>
                   )}
+                  
+                  {/* Edit Project Button */}
+                  <button
+                    onClick={() => handleOpenEdit(p)}
+                    className="p-2 border border-[#0F172A]/15 hover:border-blue-500 rounded-xl hover:bg-blue-50 text-[#475569] hover:text-blue-600 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    📝 Edit Proyek
+                  </button>
+
                   <button
                     onClick={() => archiveProject(p.id)}
-                    className="p-2 border border-[#0F172A]/15 hover:border-red-500 rounded-xl hover:bg-red-50 text-[#475569] hover:text-red-600 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer select-none"
+                    className="p-2 border border-[#0F172A]/15 hover:border-amber-500 rounded-xl hover:bg-amber-50 text-[#475569] hover:text-amber-600 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                   >
                     <Archive className="w-3.5 h-3.5" />
                     {p.isArchived ? 'Aktifkan Kembali' : 'Arsipkan Proyek'}
+                  </button>
+
+                  {/* Permanently Delete Project */}
+                  <button
+                    onClick={() => handleOpenDelete(p)}
+                    className="p-2 border border-red-200 hover:border-red-500 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 font-extrabold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Hapus Permanen
                   </button>
                 </div>
               </div>
@@ -1590,6 +2251,122 @@ export const ProjectListView: React.FC<ProjectListViewProps> = ({ onCreateProjec
           </div>
         )}
       </div>
+
+      {/* EDIT MODAL */}
+      <Modal isOpen={showEditModal} onClose={() => setShowEditModal(false)} title="Edit Informasi Proyek">
+        <form onSubmit={handleSaveEdit} className="space-y-4 select-none">
+          <div>
+            <label className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wide block mb-1">Nama Proyek *</label>
+            <input
+              type="text"
+              required
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              className="w-full bg-white border-2 border-[#0F172A] rounded-xl px-3 py-2 text-xs font-bold text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <div>
+            <label className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wide block mb-1">Lokasi Proyek *</label>
+            <input
+              type="text"
+              required
+              value={editLocation}
+              onChange={(e) => setEditLocation(e.target.value)}
+              className="w-full bg-white border-2 border-[#0F172A] rounded-xl px-3 py-2 text-xs font-bold text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <div>
+            <label className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wide block mb-1">Nama Pemilik Proyek (Owner) *</label>
+            <input
+              type="text"
+              required
+              value={editOwner}
+              onChange={(e) => setEditOwner(e.target.value)}
+              className="w-full bg-white border-2 border-[#0F172A] rounded-xl px-3 py-2 text-xs font-bold text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <div>
+            <label className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wide block mb-1">Budget Total Proyek (Rupiah) *</label>
+            <input
+              type="number"
+              required
+              value={editBudget}
+              onChange={(e) => setEditBudget(Number(e.target.value))}
+              className="w-full bg-white border-2 border-[#0F172A] rounded-xl px-3 py-2 text-xs font-bold text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wide block mb-1">Tanggal Mulai</label>
+              <input
+                type="date"
+                value={editStartDate}
+                onChange={(e) => setEditStartDate(e.target.value)}
+                className="w-full bg-white border-2 border-[#0F172A] rounded-xl px-3 py-2 text-xs font-bold text-[#0F172A] focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wide block mb-1">Target Selesai</label>
+              <input
+                type="date"
+                value={editTargetDate}
+                onChange={(e) => setEditTargetDate(e.target.value)}
+                className="w-full bg-white border-2 border-[#0F172A] rounded-xl px-3 py-2 text-xs font-bold text-[#0F172A] focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <Button variant="ghost" className="flex-1" type="button" onClick={() => setShowEditModal(false)}>Batal</Button>
+            <Button variant="secondary" className="flex-1" type="submit">Simpan Perubahan</Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* SECURITY CONFIRMATION DELETE MODAL */}
+      <Modal isOpen={showDeleteModal} onClose={() => setShowDeleteModal(false)} title="🚨 HAPUS PROYEK?">
+        <div className="space-y-4 select-none">
+          <div className="p-3.5 bg-red-50 border-2 border-red-500 rounded-xl">
+            <p className="text-xs font-extrabold text-red-700 leading-normal uppercase">
+              Semua data proyek seperti keuangan, material, tukang, upah, dan laporan terkait akan ikut dihapus.
+            </p>
+          </div>
+
+          {projectToDelete && (
+            <div className="text-xs font-bold text-[#0F172A]">
+              Proyek yang akan dihapus: <span className="font-chunky text-red-600 block uppercase mt-1">{projectToDelete.name}</span>
+            </div>
+          )}
+
+          <div className="space-y-1">
+            <label className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wide block">
+              Ketik <span className="text-red-600 font-extrabold">HAPUS</span> untuk mengonfirmasi:
+            </label>
+            <input
+              type="text"
+              value={typedConfirm}
+              onChange={(e) => setTypedConfirm(e.target.value)}
+              placeholder="Ketik HAPUS"
+              className="w-full bg-white border-2 border-[#0F172A] rounded-xl px-3 py-2.5 text-xs font-extrabold text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-red-500 uppercase tracking-widest text-center"
+            />
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <Button variant="ghost" className="flex-1" onClick={() => setShowDeleteModal(false)}>Batal</Button>
+            <button
+              onClick={handleConfirmDelete}
+              disabled={typedConfirm !== 'HAPUS'}
+              className="flex-1 py-2.5 rounded-xl border-2 border-[#0F172A] bg-red-600 hover:bg-red-700 disabled:bg-slate-100 disabled:border-slate-300 disabled:text-slate-400 font-extrabold text-xs text-white uppercase text-center transition-all cursor-pointer shadow-neo-sm"
+            >
+              Hapus Permanen
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };
@@ -1660,7 +2437,7 @@ export const NotificationsView: React.FC = () => {
 // --- VIEW 8: SETTINGS & BACKUP ENGINE ---
 export const SettingsView: React.FC = () => {
   const { state, clearAllState, logoutUser, updateCurrentUser, restoreAllState } = useApp();
-  const [googleSheetsConnected, setGoogleSheetsConnected] = useState(false);
+  const [sheetsConfig, setSheetsConfig] = useState<GoogleSheetsConnection>(loadGoogleSheetsConnection);
   const [syncingSheets, setSyncingSheets] = useState(false);
 
   // Profile Form States
@@ -1670,7 +2447,17 @@ export const SettingsView: React.FC = () => {
   const [profileAddress, setProfileAddress] = useState(state.currentUser?.address || 'Jl. Raya Konstruksi No. 45, Jakarta');
   const [profileCompany, setProfileCompany] = useState(state.currentUser?.company || 'PT Mandor Bangunan Sejahtera');
   const [profileJobTitle, setProfileJobTitle] = useState(state.currentUser?.jobTitle || 'Mandor Utama Proyek');
-  const [profilePhoto, setProfilePhoto] = useState(state.currentUser?.photo || 'https://images.unsplash.com/photo-1560250097-0b93528c311a?w=150&auto=format&fit=crop&q=80');
+
+  // Supabase Profile Avatar States
+  const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string>(state.currentUser?.photo || '');
+  const [selectedAvatarFile, setSelectedAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarDeleting, setAvatarDeleting] = useState(false);
+
+  // Hidden Input References
+  const cameraInputRef = React.useRef<HTMLInputElement>(null);
+  const galleryInputRef = React.useRef<HTMLInputElement>(null);
 
   // Security Update States
   const [pinCurrent, setPinCurrent] = useState('');
@@ -1688,23 +2475,296 @@ export const SettingsView: React.FC = () => {
   const handleSheetsConnect = () => {
     setSyncingSheets(true);
     setTimeout(() => {
-      setGoogleSheetsConnected(!googleSheetsConnected);
+      if (sheetsConfig.google_sheets_connected) {
+        const updated = disconnectGoogleSheets();
+        setSheetsConfig(updated);
+      } else {
+        const updated = connectGoogleSheets();
+        setSheetsConfig(updated);
+      }
       setSyncingSheets(false);
-    }, 1500);
+    }, 600);
   };
 
-  const handleProfileSave = (e: React.FormEvent) => {
+  const handleManualSyncSheets = async () => {
+    if (!sheetsConfig.google_sheets_connected) return;
+    setSyncingSheets(true);
+    try {
+      const activeProj = state.projects.find(p => p.id === state.activeProjectId);
+      const res = await syncReportToGoogleSheets({
+        projectName: activeProj?.name || 'Proyek DATAKU',
+        exportDate: new Date().toISOString()
+      });
+      setSheetsConfig(loadGoogleSheetsConnection());
+      alert(res.message);
+    } catch (err) {
+      alert('Gagal sinkronisasi data ke Google Sheets.');
+    } finally {
+      setSyncingSheets(false);
+    }
+  };
+
+  const handleFileSelection = (file: File) => {
+    // 10. VALIDASI
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+    if (!allowedTypes.includes(file.type)) {
+      alert('Format foto harus JPG, PNG, atau WEBP.');
+      return;
+    }
+    const maxSize = 5 * 1024 * 1024; // 5 MB
+    if (file.size > maxSize) {
+      alert('Ukuran foto maksimal 5 MB.');
+      return;
+    }
+
+    // 8. PREVIEW
+    setSelectedAvatarFile(file);
+    const objectUrl = URL.createObjectURL(file);
+    setAvatarPreview(objectUrl);
+  };
+
+  const handleCameraChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      handleFileSelection(file);
+    }
+  };
+
+  const handleGalleryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      handleFileSelection(file);
+    }
+  };
+
+  // 12. EDIT PROFIL & 4. UPLOAD & 5. URL FOTO & 7. GANTI FOTO
+  const handleProfileSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    updateCurrentUser({
-      name: profileName,
-      phone: profilePhone,
-      email: profileEmail,
-      address: profileAddress,
-      company: profileCompany,
-      jobTitle: profileJobTitle,
-      photo: profilePhoto
-    });
-    alert('Sukses menyimpan perubahan profil Mandor!');
+    const currentUser_id = state.currentUser?.id || 'MDR-PAUJI';
+    let finalPhotoUrl = currentAvatarUrl;
+
+    if (isSupabaseConfigured) {
+      setAvatarUploading(true);
+      try {
+        if (selectedAvatarFile) {
+          // 3. NAMA FILE
+          const mandorIdClean = currentUser_id.replace('MDR-', 'UUID-');
+          const timestamp = Math.floor(Date.now() / 1000);
+          const randomStr = Math.random().toString(36).substring(2, 7);
+          const extension = selectedAvatarFile.name.split('.').pop() || 'jpg';
+          const filePath = `profiles/${mandorIdClean}/${timestamp}-${randomStr}.${extension}`;
+
+          // 4. UPLOAD
+          const { error: uploadError } = await supabase.storage
+            .from('dataku-profiles')
+            .upload(filePath, selectedAvatarFile, {
+              upsert: false,
+              contentType: selectedAvatarFile.type
+            });
+
+          if (uploadError) {
+            console.error('Upload error detail:', uploadError);
+            throw new Error('Foto gagal diunggah. Silakan coba lagi.');
+          }
+
+          // 5. URL FOTO
+          const { data: { publicUrl } } = supabase.storage
+            .from('dataku-profiles')
+            .getPublicUrl(filePath);
+
+          finalPhotoUrl = publicUrl;
+
+          // RPC or direct table update
+          try {
+            const { error: rpcError } = await supabase.rpc('update_mandor_avatar', {
+              p_mandor_id: currentUser_id,
+              p_avatar_url: publicUrl
+            });
+            if (rpcError) {
+              // Direct table update fallback
+              await supabase
+                .from('mandors')
+                .update({ avatar_url: publicUrl })
+                .eq('id', currentUser_id);
+            }
+          } catch (rpcErr) {
+            await supabase
+              .from('mandors')
+              .update({ avatar_url: publicUrl })
+              .eq('id', currentUser_id);
+          }
+
+          // 7. GANTI FOTO (Delete old file from Storage if exists and was uploaded to Supabase)
+          if (currentAvatarUrl && currentAvatarUrl.includes('dataku-profiles')) {
+            try {
+              const urlParts = currentAvatarUrl.split('/dataku-profiles/');
+              if (urlParts.length > 1) {
+                const oldPath = decodeURIComponent(urlParts[1]);
+                await supabase.storage.from('dataku-profiles').remove([oldPath]);
+              }
+            } catch (delError) {
+              console.error('Failed to delete old avatar:', delError);
+            }
+          }
+        }
+
+        // Save metadata fields (full_name, phone, email, company_name, job_title, address)
+        const mandorData = {
+          full_name: profileName,
+          phone: profilePhone,
+          email: profileEmail,
+          company_name: profileCompany,
+          job_title: profileJobTitle,
+          address: profileAddress,
+          office_address: profileAddress,
+          avatar_url: finalPhotoUrl
+        };
+
+        let { error: dbError } = await supabase
+          .from('mandors')
+          .update(mandorData)
+          .eq('id', currentUser_id);
+
+        if (dbError) {
+          // Fallback profiles update if mandors doesn't exist yet
+          await supabase
+            .from('profiles')
+            .update({
+              full_name: profileName,
+              phone: profilePhone,
+              email: profileEmail,
+              avatar_url: finalPhotoUrl
+            })
+            .eq('id', currentUser_id);
+        }
+
+        setCurrentAvatarUrl(finalPhotoUrl);
+        setAvatarPreview(null);
+        setSelectedAvatarFile(null);
+
+        // Update local app context
+        updateCurrentUser({
+          id: currentUser_id,
+          name: profileName,
+          phone: profilePhone,
+          email: profileEmail,
+          address: profileAddress,
+          company: profileCompany,
+          jobTitle: profileJobTitle,
+          photo: finalPhotoUrl
+        });
+
+        // 16. SUCCESS TOAST
+        alert('✓ Foto profil berhasil diperbarui.');
+      } catch (err: any) {
+        console.error('Profile save failure:', err);
+        // 17. ERROR HANDLING
+        alert(err.message === 'Foto gagal diunggah. Silakan coba lagi.' ? err.message : 'Terjadi masalah saat mengunggah foto.');
+      } finally {
+        setAvatarUploading(false);
+      }
+    } else {
+      // Local localStorage mode
+      if (selectedAvatarFile && avatarPreview) {
+        finalPhotoUrl = avatarPreview;
+      }
+      setCurrentAvatarUrl(finalPhotoUrl);
+      setAvatarPreview(null);
+      setSelectedAvatarFile(null);
+
+      updateCurrentUser({
+        id: currentUser_id,
+        name: profileName,
+        phone: profilePhone,
+        email: profileEmail,
+        address: profileAddress,
+        company: profileCompany,
+        jobTitle: profileJobTitle,
+        photo: finalPhotoUrl
+      });
+      alert('✓ Foto profil berhasil diperbarui.');
+    }
+  };
+
+  // 6. HAPUS FOTO
+  const handleHapusFoto = async () => {
+    // Dialog check
+    if (!window.confirm("Hapus foto profil?\n\nFoto profil akan dihapus dari akun Anda.")) {
+      return;
+    }
+
+    const currentUser_id = state.currentUser?.id || 'MDR-PAUJI';
+
+    if (isSupabaseConfigured) {
+      setAvatarDeleting(true);
+      try {
+        // 1. Cari file avatar lama & hapus dari bucket dataku-profiles
+        if (currentAvatarUrl && currentAvatarUrl.includes('dataku-profiles')) {
+          try {
+            const urlParts = currentAvatarUrl.split('/dataku-profiles/');
+            if (urlParts.length > 1) {
+              const oldPath = decodeURIComponent(urlParts[1]);
+              await supabase.storage.from('dataku-profiles').remove([oldPath]);
+            }
+          } catch (delError) {
+            console.error('Failed to delete avatar file from storage:', delError);
+          }
+        }
+
+        // 2. Update avatar_url = null
+        let { error: dbError } = await supabase
+          .from('mandors')
+          .update({ avatar_url: null })
+          .eq('id', currentUser_id);
+
+        if (dbError) {
+          await supabase
+            .from('profiles')
+            .update({ avatar_url: null })
+            .eq('id', currentUser_id);
+        }
+
+        setCurrentAvatarUrl('');
+        setAvatarPreview(null);
+        setSelectedAvatarFile(null);
+
+        // 4. Refresh profile locally
+        updateCurrentUser({
+          id: currentUser_id,
+          name: profileName,
+          phone: profilePhone,
+          email: profileEmail,
+          address: profileAddress,
+          company: profileCompany,
+          jobTitle: profileJobTitle,
+          photo: ''
+        });
+
+        alert('✓ Foto profil berhasil dihapus.');
+      } catch (err) {
+        console.error('Error during photo delete:', err);
+        alert('Terjadi masalah saat menghapus foto.');
+      } finally {
+        setAvatarDeleting(false);
+      }
+    } else {
+      // Local mode
+      setCurrentAvatarUrl('');
+      setAvatarPreview(null);
+      setSelectedAvatarFile(null);
+
+      updateCurrentUser({
+        id: currentUser_id,
+        name: profileName,
+        phone: profilePhone,
+        email: profileEmail,
+        address: profileAddress,
+        company: profileCompany,
+        jobTitle: profileJobTitle,
+        photo: ''
+      });
+      alert('✓ Foto profil berhasil dihapus.');
+    }
   };
 
   const handleSecuritySave = (e: React.FormEvent) => {
@@ -1730,25 +2790,6 @@ export const SettingsView: React.FC = () => {
     setPinCurrent('');
     setPinNew('');
     setPinConfirm('');
-  };
-
-  // Simulating Camera capture
-  const handleTriggerCamera = () => {
-    const urls = [
-      'https://images.unsplash.com/photo-1540569014015-19a7be504e3a?w=150&auto=format&fit=crop&q=80',
-      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-      'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80'
-    ];
-    const randomUrl = urls[Math.floor(Math.random() * urls.length)];
-    setProfilePhoto(randomUrl);
-    alert('Simulasi: Foto profil baru berhasil ditangkap menggunakan Kamera HP Mandor!');
-  };
-
-  // Trigger File Input simulation
-  const handleTriggerFile = () => {
-    const fileUrl = 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80';
-    setProfilePhoto(fileUrl);
-    alert('Simulasi: Foto profil baru berhasil diupload dari Galeri HP Mandor!');
   };
 
   // Backup DATAKU state as raw JSON file download
@@ -1794,6 +2835,8 @@ export const SettingsView: React.FC = () => {
     }
   };
 
+
+
   return (
     <div className="space-y-6">
       {/* 1. EDIT PROFIL MANDOR & FOTO */}
@@ -1805,15 +2848,44 @@ export const SettingsView: React.FC = () => {
         <form onSubmit={handleProfileSave} className="space-y-5">
           {/* Foto Upload & Camera Block */}
           <div className="flex flex-col sm:flex-row items-center gap-4 bg-[#FAF8FF] border-2 border-[#0F172A] rounded-xl p-4">
-            <div className="w-20 h-20 rounded-xl border-3 border-[#0F172A] overflow-hidden bg-amber-50 shadow-neo shrink-0 relative">
-              <img src={profilePhoto} alt="Foto Profil" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-              {profilePhoto && (
+            {/* Hidden Input Pickers */}
+            <input
+              type="file"
+              accept="image/*"
+              capture="user"
+              ref={cameraInputRef}
+              className="hidden"
+              onChange={handleCameraChange}
+            />
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              ref={galleryInputRef}
+              className="hidden"
+              onChange={handleGalleryChange}
+            />
+
+            <div className="w-20 h-20 rounded-xl border-3 border-[#0F172A] overflow-hidden bg-amber-50 shadow-neo shrink-0 relative flex items-center justify-center select-none">
+              {avatarPreview || currentAvatarUrl ? (
+                <img
+                  src={avatarPreview || currentAvatarUrl}
+                  alt="Foto Profil"
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center text-center">
+                  <span className="text-3xl text-slate-400">👷</span>
+                </div>
+              )}
+              {(avatarPreview || currentAvatarUrl) && (
                 <button
                   type="button"
-                  onClick={() => setProfilePhoto('')}
-                  className="absolute bottom-0 left-0 right-0 py-0.5 bg-red-600 border-t border-[#0F172A] text-[9px] text-white font-extrabold text-center hover:bg-red-700 cursor-pointer"
+                  disabled={avatarUploading || avatarDeleting}
+                  onClick={handleHapusFoto}
+                  className="absolute bottom-0 left-0 right-0 py-0.5 bg-red-600 border-t border-[#0F172A] text-[9px] text-white font-extrabold text-center hover:bg-red-700 cursor-pointer disabled:opacity-50"
                 >
-                  Hapus Foto
+                  {avatarDeleting ? 'Menghapus...' : 'Hapus Foto'}
                 </button>
               )}
             </div>
@@ -1821,22 +2893,24 @@ export const SettingsView: React.FC = () => {
             <div className="space-y-1.5 text-center sm:text-left">
               <p className="text-xs font-extrabold text-[#0F172A] uppercase leading-none">Foto Profil Mandor</p>
               <p className="text-[10px] text-[#64748B] font-bold uppercase tracking-wide">
-                Gunakan kamera HP atau upload file JPG / PNG
+                Gunakan kamera HP atau upload file JPG / PNG / WEBP
               </p>
               <div className="flex flex-wrap justify-center sm:justify-start gap-2 pt-1">
                 <button
                   type="button"
-                  onClick={handleTriggerCamera}
-                  className="px-2.5 py-1.5 bg-white border border-[#0F172A] hover:bg-slate-50 text-[10px] font-extrabold text-[#0F172A] rounded-lg transition-all cursor-pointer shadow-neo-sm"
+                  disabled={avatarUploading || avatarDeleting}
+                  onClick={() => cameraInputRef.current?.click()}
+                  className="px-2.5 py-1.5 bg-white border border-[#0F172A] hover:bg-slate-50 text-[10px] font-extrabold text-[#0F172A] rounded-lg transition-all cursor-pointer shadow-neo-sm disabled:opacity-50"
                 >
-                  📷 Ambil Foto HP
+                  {avatarUploading ? 'Mengunggah...' : '📷 Ambil Foto HP'}
                 </button>
                 <button
                   type="button"
-                  onClick={handleTriggerFile}
-                  className="px-2.5 py-1.5 bg-white border border-[#0F172A] hover:bg-slate-50 text-[10px] font-extrabold text-[#0F172A] rounded-lg transition-all cursor-pointer shadow-neo-sm"
+                  disabled={avatarUploading || avatarDeleting}
+                  onClick={() => galleryInputRef.current?.click()}
+                  className="px-2.5 py-1.5 bg-white border border-[#0F172A] hover:bg-slate-50 text-[10px] font-extrabold text-[#0F172A] rounded-lg transition-all cursor-pointer shadow-neo-sm disabled:opacity-50"
                 >
-                  📁 Unggah Galeri
+                  {avatarUploading ? 'Mengunggah...' : '📁 Unggah Galeri'}
                 </button>
               </div>
             </div>
@@ -2058,6 +3132,8 @@ export const SettingsView: React.FC = () => {
         </div>
       </Card>
 
+
+
       {/* 5. Google Sheets Sync System (Workspace integration mockup) */}
       <Card>
         <span className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wider block mb-2 select-none">
@@ -2071,32 +3147,65 @@ export const SettingsView: React.FC = () => {
         </p>
 
         <div className="bg-[#FAF8FF] border-2 border-[#0F172A] rounded-xl p-4 space-y-4 shadow-neo-sm">
-          <div className="flex items-center justify-between gap-3 select-none">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 select-none">
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-lg bg-emerald-50 border border-[#0F172A] flex items-center justify-center text-lg shadow-neo-sm">
+              <div className="w-10 h-10 rounded-lg bg-emerald-50 border-2 border-[#0F172A] flex items-center justify-center text-xl shadow-neo-sm">
                 📊
               </div>
               <div>
                 <p className="text-xs font-extrabold text-[#0F172A] uppercase leading-none">Google Sheets Connector</p>
-                <p className="text-[9px] text-[#64748B] font-bold uppercase mt-1">
-                  Status: {googleSheetsConnected ? '🟢 Tersambung & Aktif' : '⚪ Belum Terhubung'}
+                <p className="text-[10px] text-[#64748B] font-bold uppercase mt-1">
+                  Status: {sheetsConfig.google_sheets_connected ? '🟢 Tersambung & Aktif' : '⚪ Belum Terhubung'}
                 </p>
               </div>
             </div>
 
-            <Button
-              variant={googleSheetsConnected ? 'ghost' : 'secondary'}
-              size="sm"
-              onClick={handleSheetsConnect}
-              disabled={syncingSheets}
-            >
-              {syncingSheets ? 'Menghubungkan...' : googleSheetsConnected ? 'Putuskan' : 'Hubungkan'}
-            </Button>
+            <div className="flex items-center gap-2">
+              {sheetsConfig.google_sheets_connected && (
+                <button
+                  type="button"
+                  onClick={handleManualSyncSheets}
+                  disabled={syncingSheets}
+                  className="px-3 py-1.5 rounded-lg border-2 border-[#0F172A] bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-neo-sm transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {syncingSheets ? 'Menyinkronkan...' : '🔄 Sinkron Sekarang'}
+                </button>
+              )}
+              <Button
+                variant={sheetsConfig.google_sheets_connected ? 'ghost' : 'secondary'}
+                size="sm"
+                onClick={handleSheetsConnect}
+                disabled={syncingSheets}
+              >
+                {syncingSheets ? 'Memproses...' : sheetsConfig.google_sheets_connected ? 'Putuskan' : 'Hubungkan'}
+              </Button>
+            </div>
           </div>
 
-          {googleSheetsConnected && (
-            <div className="text-xs font-semibold text-[#065F46] bg-[#D1FAE5] border border-[#059669] p-3 rounded-xl flex items-center gap-2 select-all">
-              <span>🚀 <b>Sukses Tersambung:</b> Backup lembar kerja 'DATAKU_MANDOR_BACKUP.xlsx' berhasil dijadwalkan setiap pukul 18:00 WIB.</span>
+          {sheetsConfig.google_sheets_connected ? (
+            <div className="space-y-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs bg-white border border-[#0F172A]/20 rounded-xl p-3">
+                <div>
+                  <span className="text-[9px] text-[#64748B] font-extrabold uppercase block">Lembar Kerja Target</span>
+                  <span className="font-bold text-[#0F172A]">{sheetsConfig.google_sheets_document_name}</span>
+                </div>
+                <div>
+                  <span className="text-[9px] text-[#64748B] font-extrabold uppercase block">Jadwal Auto-Backup</span>
+                  <span className="font-bold text-emerald-700">{sheetsConfig.google_sheets_backup_schedule}</span>
+                </div>
+                <div className="sm:col-span-2 pt-1 border-t border-slate-100 flex flex-wrap justify-between items-center text-[10px]">
+                  <span className="text-slate-500 font-bold">Terakhir Sinkron:</span>
+                  <span className="font-black text-slate-800">{sheetsConfig.google_sheets_last_sync || 'Belum pernah'}</span>
+                </div>
+              </div>
+
+              <div className="text-xs font-semibold text-[#065F46] bg-[#D1FAE5] border border-[#059669] p-3 rounded-xl flex items-center gap-2 select-all">
+                <span>🚀 <b>Sukses Tersambung:</b> Backup lembar kerja '{sheetsConfig.google_sheets_document_name}' persisten & tersinkronisasi.</span>
+              </div>
+            </div>
+          ) : (
+            <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-900 font-medium">
+              💡 Hubungkan akun Google Workspace Anda untuk mengaktifkan backup otomatis data harian dan rekap upah ke Google Sheets.
             </div>
           )}
         </div>
