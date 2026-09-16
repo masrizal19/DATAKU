@@ -93,7 +93,13 @@ export function buildCurrentReportData(
   const mutasiDana = projectTxs.filter(tx => {
     const txDateStr = tx.date.substring(0, 10);
     return txDateStr >= dateStart && txDateStr <= dateEnd;
-  }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }).sort((a, b) => {
+    const orderA = a.displayOrder || 0;
+    const orderB = b.displayOrder || 0;
+    if (orderA !== orderB) return orderA - orderB;
+    // Fallback to date ASC
+    return new Date(a.date).getTime() - new Date(b.date).getTime();
+  });
 
   // Hitung Ringkasan
   let danaMasuk = 0;

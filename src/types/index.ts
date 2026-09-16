@@ -44,6 +44,8 @@ export interface Transaction {
   notes: string;
   photos: string[];
   status?: 'BELUM_DIBAYAR' | 'SEBAGIAN' | 'LUNAS'; // Khusus upah
+  displayOrder?: number;
+  createdAt?: string;
 }
 
 export type MaterialCategory =

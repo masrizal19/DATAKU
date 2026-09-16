@@ -124,6 +124,39 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({ reportData
                   <span className="font-black text-emerald-800 text-sm block mt-0.5">{formatRupiah(reportData.ringkasan.saldoKas)}</span>
                 </div>
               </div>
+
+              {/* Rincian Persentase Pengeluaran Berdasarkan Kategori */}
+              {(() => {
+                const totalOut = reportData.ringkasan.pengeluaran;
+                const categoriesMap: { [key: string]: number } = {};
+                reportData.mutasiDana.filter(t => t.type !== 'DANA_MASUK').forEach(t => {
+                  categoriesMap[t.category] = (categoriesMap[t.category] || 0) + t.amount;
+                });
+                const categoriesList = Object.keys(categoriesMap).map(k => ({
+                  name: k,
+                  amount: categoriesMap[k],
+                  percentage: totalOut > 0 ? Math.round((categoriesMap[k] / totalOut) * 100) : 0
+                })).sort((a, b) => b.amount - a.amount);
+
+                return (
+                  <div className="mt-3.5 border-t border-slate-200 pt-3">
+                    <span className="text-slate-500 text-[9px] font-extrabold uppercase block mb-1.5">Rincian Persentase Pengeluaran Berdasarkan Kategori</span>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-[10px]">
+                      {categoriesList.map((c, idx) => (
+                        <div key={idx} className="bg-slate-50 p-1.5 rounded border border-slate-200">
+                          <span className="text-slate-600 font-extrabold uppercase block truncate">{c.name}</span>
+                          <span className="font-extrabold text-slate-950 block mt-0.5">
+                            {formatRupiah(c.amount)} <span className="text-slate-500 font-normal">({c.percentage}%)</span>
+                          </span>
+                        </div>
+                      ))}
+                      {categoriesList.length === 0 && (
+                        <div className="col-span-full text-slate-400 font-medium italic">Belum ada pengeluaran tercatat.</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* SECTION II: DAFTAR MUTASI DANA */}

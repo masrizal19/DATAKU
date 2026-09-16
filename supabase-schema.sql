@@ -72,6 +72,7 @@ create table if not exists public.transactions (
   description text,
   transaction_date date not null,
   reference_id uuid, -- Optional reference
+  display_order integer default 0,
   created_by uuid references public.profiles(id) on delete set null,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null

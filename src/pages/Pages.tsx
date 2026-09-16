@@ -31,7 +31,8 @@ import {
   Briefcase,
   FileSpreadsheet,
   FileDown,
-  Printer
+  Printer,
+  GripVertical
 } from 'lucide-react';
 import { Transaction, Material, MaterialLog, Worker, DailyReport, Project, MaterialCategory, MasterWorker } from '../types';
 import { buildCurrentReportData, exportReportToExcel, exportReportToCSV } from '../utils/rekapEngine';
@@ -963,10 +964,40 @@ export const InventoryView: React.FC = () => {
 
 // --- VIEW 3: KEUANGAN VIEW & LEDGER ---
 export const FinanceView: React.FC = () => {
-  const { state, deleteTransaction, updateTransaction } = useApp();
+  const { state, deleteTransaction, updateTransaction, updateTransactionsOrder } = useApp();
   const activeProj = state.projects.find(p => p.id === state.activeProjectId);
   const [activeFilter, setActiveFilter] = useState<'SEMUA' | 'DANA_MASUK' | 'PENGELUARAN' | 'UPAH_TUKANG'>('SEMUA');
   
+  // Drag and drop state
+  const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
+
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedIdx(index);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = async (e: React.DragEvent, targetIdx: number) => {
+    e.preventDefault();
+    if (draggedIdx === null || draggedIdx === targetIdx) return;
+    if (activeFilter !== 'SEMUA') return;
+
+    // Create reordered copy of filteredTxs
+    const reordered = [...filteredTxs];
+    const [draggedItem] = reordered.splice(draggedIdx, 1);
+    reordered.splice(targetIdx, 0, draggedItem);
+
+    setDraggedIdx(null);
+    await updateTransactionsOrder(reordered);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIdx(null);
+  };
+
   // States for confirmation delete and edit modal
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
@@ -1173,57 +1204,84 @@ export const FinanceView: React.FC = () => {
 
         {/* Timeline list */}
         <div className="space-y-3">
-          {filteredTxs.map((tx) => (
-            <Card key={tx.id} className="p-4 select-none hover:bg-[#FAF8FF] transition-all">
-              <div className="flex justify-between items-start gap-2.5">
-                <div className="flex items-start gap-3">
-                  <div className={`w-10 h-10 rounded-xl border-2 border-[#0F172A] shadow-neo-sm flex items-center justify-center font-bold text-sm ${tx.type === 'DANA_MASUK' ? 'bg-[#D1FAE5]' : 'bg-[#FEE2E2]'}`}>
-                    {tx.type === 'DANA_MASUK' ? '＋' : '－'}
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-extrabold text-[#0F172A] leading-snug uppercase">{tx.sourceOrRecipient}</h4>
-                    <p className="text-[10px] text-[#64748B] font-extrabold uppercase mt-1 leading-none tracking-wide">
-                      {tx.category} • {formatTanggalWaktu(tx.date)}
-                    </p>
-                    <p className="text-xs text-[#0F172A] font-semibold italic mt-2">"{tx.notes || 'Tidak ada catatan.'}"</p>
-                    
-                    {tx.photos && tx.photos.length > 0 && (
-                      <div className="flex gap-2 mt-2.5">
-                        {tx.photos.map((p, idx) => (
-                          <div key={idx} className="w-12 h-12 rounded-lg border border-[#0F172A] overflow-hidden bg-white shadow-neo-sm">
-                            <img src={p} alt="Lampiran Bukti" className="w-full h-full object-cover" />
-                          </div>
-                        ))}
+          {activeFilter === 'SEMUA' && filteredTxs.length > 0 && (
+            <div className="text-[10px] text-[#0284C7] font-extrabold uppercase tracking-wide px-1 select-none flex items-center gap-1.5 animate-pulse">
+              <GripVertical className="w-3.5 h-3.5 text-[#0284C7]" /> Tahan & geser kartu transaksi untuk mengurutkan posisi alur keuangan secara visual.
+            </div>
+          )}
+          {filteredTxs.map((tx, index) => {
+            const isDragged = draggedIdx === index;
+            return (
+              <Card
+                key={tx.id}
+                draggable={activeFilter === 'SEMUA'}
+                onDragStart={(e) => handleDragStart(e, index)}
+                onDragOver={(e) => handleDragOver(e, index)}
+                onDragEnd={handleDragEnd}
+                onDrop={(e) => handleDrop(e, index)}
+                className={`p-4 select-none transition-all duration-200 border-2 ${
+                  isDragged
+                    ? 'opacity-40 border-dashed border-[#0F172A] bg-amber-50'
+                    : 'border-[#0F172A] hover:bg-[#FAF8FF]'
+                } ${
+                  activeFilter === 'SEMUA' ? 'hover:cursor-grab active:cursor-grabbing' : ''
+                }`}
+              >
+                <div className="flex justify-between items-start gap-2.5">
+                  <div className="flex items-start gap-3">
+                    {activeFilter === 'SEMUA' && (
+                      <div className="pt-2 text-slate-400 hover:text-slate-600 transition-colors cursor-grab" title="Geser untuk mengurutkan">
+                        <GripVertical className="w-4 h-4" />
                       </div>
                     )}
+                    <div className={`w-10 h-10 rounded-xl border-2 border-[#0F172A] shadow-neo-sm flex items-center justify-center font-bold text-sm ${tx.type === 'DANA_MASUK' ? 'bg-[#D1FAE5]' : 'bg-[#FEE2E2]'}`}>
+                      {tx.type === 'DANA_MASUK' ? '＋' : '－'}
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-extrabold text-[#0F172A] leading-snug uppercase">{tx.sourceOrRecipient}</h4>
+                      <p className="text-[10px] text-[#64748B] font-extrabold uppercase mt-1 leading-none tracking-wide">
+                        {tx.category} • {formatTanggalWaktu(tx.date)}
+                      </p>
+                      <p className="text-xs text-[#0F172A] font-semibold italic mt-2">"{tx.notes || 'Tidak ada catatan.'}"</p>
+                      
+                      {tx.photos && tx.photos.length > 0 && (
+                        <div className="flex gap-2 mt-2.5">
+                          {tx.photos.map((p, idx) => (
+                            <div key={idx} className="w-12 h-12 rounded-lg border border-[#0F172A] overflow-hidden bg-white shadow-neo-sm">
+                              <img src={p} alt="Lampiran Bukti" className="w-full h-full object-cover" />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
 
-                <div className="text-right flex flex-col items-end gap-2">
-                  <span className={`font-chunky text-sm ${tx.type === 'DANA_MASUK' ? 'text-[#065F46]' : 'text-[#B91C1C]'}`}>
-                    {tx.type === 'DANA_MASUK' ? '+' : '-'} {formatRupiah(tx.amount)}
-                  </span>
-                  
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => handleEditClick(tx)}
-                      className="p-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 transition-all cursor-pointer"
-                      title="Edit Transaksi"
-                    >
-                      ✏️
-                    </button>
-                    <button
-                      onClick={() => handleDeleteClick(tx)}
-                      className="p-1.5 rounded-lg border border-red-200 text-[#EF4444] hover:bg-red-50 hover:border-[#EF4444] transition-all cursor-pointer"
-                      title="Hapus"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                  <div className="text-right flex flex-col items-end gap-2">
+                    <span className={`font-chunky text-sm ${tx.type === 'DANA_MASUK' ? 'text-[#065F46]' : 'text-[#B91C1C]'}`}>
+                      {tx.type === 'DANA_MASUK' ? '+' : '-'} {formatRupiah(tx.amount)}
+                    </span>
+                    
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => handleEditClick(tx)}
+                        className="p-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 transition-all cursor-pointer"
+                        title="Edit Transaksi"
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        onClick={() => handleDeleteClick(tx)}
+                        className="p-1.5 rounded-lg border border-red-200 text-[#EF4444] hover:bg-red-50 hover:border-[#EF4444] transition-all cursor-pointer"
+                        title="Hapus"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </Card>
-          ))}
+              </Card>
+            );
+          })}
 
           {filteredTxs.length === 0 && (
             <div className="text-center py-10 bg-white border-2 border-dashed border-[#0F172A]/20 rounded-2xl p-6 select-none">

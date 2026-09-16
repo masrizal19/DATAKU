@@ -45,6 +45,7 @@ interface AppContextType {
   addDailyReport: (report: Omit<DailyReport, 'id' | 'projectId'>) => Promise<void>;
   deleteTransaction: (id: string) => Promise<void>;
   updateTransaction: (tx: Partial<Transaction> & { id: string }) => Promise<void>;
+  updateTransactionsOrder: (orderedItems: Transaction[]) => Promise<void>;
   updateMaterialLog: (log: Partial<MaterialLog> & { id: string }) => Promise<void>;
   deleteMaterialLog: (id: string) => Promise<void>;
   deleteDailyReport: (id: string) => Promise<void>;
@@ -918,19 +919,55 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const { error } = await supabase.from('transactions').delete().eq('id', id);
         if (error) throw error;
         if (state.activeProjectId) {
+          // Normalisasi display_order transaksi yang tersisa
+          const remainingData = await transactionService.getTransactions(state.activeProjectId);
+          const updates = remainingData.map((t, idx) => ({
+            id: t.id,
+            display_order: idx + 1
+          }));
+          if (updates.length > 0) {
+            await transactionService.updateTransactionsOrder(updates);
+          }
           await loadTransactions(state.activeProjectId);
         }
       } else {
-        setState(prev => ({
-          ...prev,
-          transactions: prev.transactions.filter(t => t.id !== id)
-        }));
+        setState(prev => {
+          const filtered = prev.transactions.filter(t => t.id !== id);
+          return {
+            ...prev,
+            transactions: filtered.map((t, idx) => ({ ...t, displayOrder: idx + 1 }))
+          };
+        });
       }
       triggerNotification('Transaksi berhasil dihapus dari database.', 'INFO');
     } catch (err: any) {
       console.error('Error deleting transaction:', err);
       triggerNotification(`Gagal menghapus transaksi: ${err.message || 'Error'}`, 'ALERT');
       throw err;
+    }
+  };
+
+  const updateTransactionsOrder = async (orderedItems: Transaction[]) => {
+    // Update local state immediately for instant, responsive feedback (Optimistic UI)
+    setState(prev => ({
+      ...prev,
+      transactions: orderedItems.map((item, idx) => ({ ...item, displayOrder: idx + 1 }))
+    }));
+
+    if (isSupabaseConfigured) {
+      try {
+        const payload = orderedItems.map((item, idx) => ({
+          id: item.id,
+          display_order: idx + 1
+        }));
+        await transactionService.updateTransactionsOrder(payload);
+        // Silent reload
+        if (state.activeProjectId) {
+          await loadTransactions(state.activeProjectId);
+        }
+      } catch (err) {
+        console.error('Failed to save manual drag display order:', err);
+      }
     }
   };
 
@@ -1338,6 +1375,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addDailyReport,
         deleteTransaction,
         updateTransaction,
+        updateTransactionsOrder,
         updateMaterialLog,
         deleteMaterialLog,
         deleteDailyReport,

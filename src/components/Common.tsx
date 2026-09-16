@@ -51,7 +51,7 @@ export const Button: React.FC<ButtonProps> = ({
 };
 
 // Custom Card
-interface CardProps {
+interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode;
   className?: string;
   onClick?: () => void;
@@ -62,7 +62,8 @@ export const Card: React.FC<CardProps> = ({
   children,
   className = '',
   onClick,
-  variant = 'white'
+  variant = 'white',
+  ...props
 }) => {
   const bgClasses = {
     white: 'bg-white',
@@ -79,6 +80,7 @@ export const Card: React.FC<CardProps> = ({
     <div
       onClick={onClick}
       className={`rounded-2xl border-2 border-[#0F172A] p-4 shadow-neo ${bgClasses[variant]} ${clickableClasses} ${className}`}
+      {...props}
     >
       {children}
     </div>
