@@ -8,6 +8,7 @@ import { useApp } from '../context/AppContext';
 import { Card, Button, Input, Toast } from '../components/Common';
 import { Sparkles } from 'lucide-react';
 import { supabase, isSupabaseConfigured, hasSupabaseUrl, hasSupabasePublishableKey } from '../lib/supabase';
+import { getMandorUuid, isUuidFormat } from '../services/userService';
 
 interface AuthProps {
   onAuthSuccess: () => void;
@@ -126,7 +127,7 @@ export const AuthScreen: React.FC<AuthProps> = ({ onAuthSuccess }) => {
         // 3. Evaluasi hasil kembalian login_mandor
         // Mendukung boolean true/false, object { success: true, ... }, atau array data mandor
         let isSuccess = false;
-        let mandorId = 'demo-id';
+        let mandorId = '';
         let mandorName = trimmedUsername;
 
         if (data === true) {
@@ -136,7 +137,7 @@ export const AuthScreen: React.FC<AuthProps> = ({ onAuthSuccess }) => {
             if ((data as any).success === true) {
               isSuccess = true;
               if ((data as any).mandor) {
-                mandorId = (data as any).mandor.id || mandorId;
+                mandorId = (data as any).mandor.id || '';
                 mandorName = (data as any).mandor.full_name || (data as any).mandor.username || mandorName;
               }
             } else {
@@ -145,26 +146,34 @@ export const AuthScreen: React.FC<AuthProps> = ({ onAuthSuccess }) => {
           } else if (Array.isArray(data)) {
             if (data.length > 0) {
               isSuccess = true;
-              mandorId = data[0].id || mandorId;
+              mandorId = data[0].id || '';
               mandorName = data[0].full_name || data[0].username || mandorName;
             } else {
               isSuccess = false;
             }
           } else if (Object.keys(data).length > 0) {
             isSuccess = true;
-            mandorId = (data as any).id || mandorId;
+            mandorId = (data as any).id || '';
             mandorName = (data as any).full_name || (data as any).username || mandorName;
           }
         }
 
         if (isSuccess) {
+          const validUuid = isUuidFormat(mandorId) ? mandorId : await getMandorUuid(trimmedUsername);
+          if (validUuid) {
+            mandorId = validUuid;
+          }
+
           setSuccessToast(`Login berhasil. Selamat datang, ${mandorName}!`);
 
           localStorage.setItem('dataku_auth', 'true');
           localStorage.setItem('dataku_user', trimmedUsername);
-          localStorage.setItem('dataku_mandor_id', mandorId);
+          localStorage.setItem('dataku_pin', trimmedPin);
+          if (mandorId && isUuidFormat(mandorId)) {
+            localStorage.setItem('dataku_mandor_id', mandorId);
+          }
 
-          loginUser(trimmedUsername);
+          loginUser(trimmedUsername, mandorId);
 
           setTimeout(() => {
             onAuthSuccess();

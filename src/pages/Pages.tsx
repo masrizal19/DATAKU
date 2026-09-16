@@ -37,6 +37,7 @@ import { Transaction, Material, MaterialLog, Worker, DailyReport, Project, Mater
 import { buildCurrentReportData, exportReportToExcel, exportReportToCSV } from '../utils/rekapEngine';
 import { PrintPreviewModal } from '../components/PrintPreviewModal';
 import { documentService } from '../services/documentService';
+import { getMandorUuid, isUuidFormat } from '../services/userService';
 import {
   loadGoogleSheetsConnection,
   connectGoogleSheets,
@@ -407,7 +408,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
 // --- VIEW 2: INVENTORY / BARANG VIEW ---
 export const InventoryView: React.FC = () => {
-  const { state, addBarangKeluar, addBarangTerpakai, updateMaterial, deleteMaterial } = useApp();
+  const { state, addBarangKeluar, addBarangTerpakai, updateMaterial, deleteMaterial, updateMaterialLog, deleteMaterialLog } = useApp();
   const activeProj = state.projects.find(p => p.id === state.activeProjectId);
   const [activeSubTab, setActiveSubTab] = useState<'stok' | 'riwayat'>('stok');
 
@@ -418,6 +419,21 @@ export const InventoryView: React.FC = () => {
   const [editStock, setEditStock] = useState(0);
   const [editUnit, setEditUnit] = useState('');
   const [editMinStock, setEditMinStock] = useState(5);
+
+  // Edit Material Log states
+  const [editingLog, setEditingLog] = useState<MaterialLog | null>(null);
+  const [showEditLogModal, setShowEditLogModal] = useState(false);
+  const [editLogAmount, setEditLogAmount] = useState<number>(0);
+  const [editLogPrice, setEditLogPrice] = useState<number>(0);
+  const [editLogSupplier, setEditLogSupplier] = useState<string>('');
+  const [editLogPurpose, setEditLogPurpose] = useState<string>('');
+  const [editLogNotes, setEditLogNotes] = useState<string>('');
+  const [editLogDate, setEditLogDate] = useState<string>('');
+  const [isUpdatingLog, setIsUpdatingLog] = useState(false);
+
+  // Delete Material Log states
+  const [deletingLog, setDeletingLog] = useState<MaterialLog | null>(null);
+  const [showConfirmDeleteLogModal, setShowConfirmDeleteLogModal] = useState(false);
 
   if (!activeProj) {
     return <div className="text-center py-8">Pilih proyek aktif terlebih dahulu.</div>;
@@ -439,6 +455,53 @@ export const InventoryView: React.FC = () => {
     setEditStock(m.stock);
     setEditUnit(m.unit);
     setEditMinStock(m.minStock);
+  };
+
+  const handleEditLogClick = (log: MaterialLog) => {
+    setEditingLog(log);
+    setEditLogAmount(log.amount);
+    setEditLogPrice(log.pricePerUnit || 0);
+    setEditLogSupplier(log.supplier || '');
+    setEditLogPurpose(log.purposeOrWork || '');
+    setEditLogNotes(log.notes || '');
+    setEditLogDate(log.date);
+    setShowEditLogModal(true);
+  };
+
+  const handleSaveEditLog = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingLog) return;
+    setIsUpdatingLog(true);
+    try {
+      await updateMaterialLog({
+        id: editingLog.id,
+        amount: Number(editLogAmount) || 0,
+        pricePerUnit: Number(editLogPrice) || 0,
+        supplier: editLogSupplier,
+        purposeOrWork: editLogPurpose,
+        notes: editLogNotes,
+        date: editLogDate
+      });
+      setShowEditLogModal(false);
+      setEditingLog(null);
+    } catch (err) {
+      // Handled in updateMaterialLog
+    } finally {
+      setIsUpdatingLog(false);
+    }
+  };
+
+  const handleDeleteLogClick = (log: MaterialLog) => {
+    setDeletingLog(log);
+    setShowConfirmDeleteLogModal(true);
+  };
+
+  const confirmDeleteLog = async () => {
+    if (deletingLog) {
+      await deleteMaterialLog(deletingLog.id);
+      setShowConfirmDeleteLogModal(false);
+      setDeletingLog(null);
+    }
   };
 
   return (
@@ -632,9 +695,29 @@ export const InventoryView: React.FC = () => {
                   </Badge>
                   <span className="text-xs font-extrabold text-[#0F172A]">{log.materialName}</span>
                 </div>
-                <span className="text-[10px] font-semibold text-[#64748B] flex items-center gap-1">
-                  <Clock className="w-3 h-3" /> {formatTanggalWaktu(log.date)}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-semibold text-[#64748B] flex items-center gap-1">
+                    <Clock className="w-3 h-3" /> {formatTanggalWaktu(log.date)}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleEditLogClick(log)}
+                      className="p-1 rounded border border-slate-300 text-slate-700 hover:bg-slate-100 transition-all cursor-pointer text-[10px]"
+                      title="Edit Log Material"
+                    >
+                      ✏️
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteLogClick(log)}
+                      className="p-1 rounded border border-red-200 text-[#EF4444] hover:bg-red-50 hover:border-[#EF4444] transition-all cursor-pointer"
+                      title="Hapus Log Material"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-semibold text-[#475569]">
@@ -771,6 +854,108 @@ export const InventoryView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* EDIT MATERIAL LOG MODAL */}
+      <Modal
+        isOpen={showEditLogModal}
+        onClose={() => setShowEditLogModal(false)}
+        title={`Edit Log Material: ${editingLog?.materialName}`}
+      >
+        <form onSubmit={handleSaveEditLog} className="space-y-4">
+          <Input
+            label="Tanggal Transaksi"
+            type="date"
+            value={editLogDate}
+            onChange={(e) => setEditLogDate(e.target.value)}
+            required
+          />
+          <Input
+            label={`Jumlah (${editingLog?.unit || 'satuan'})`}
+            type="number"
+            value={editLogAmount}
+            onChange={(e) => setEditLogAmount(Number(e.target.value))}
+            required
+            min={0}
+          />
+          {editingLog?.type === 'MASUK' && (
+            <>
+              <Input
+                label="Harga Satuan (Rp)"
+                type="number"
+                value={editLogPrice}
+                onChange={(e) => setEditLogPrice(Number(e.target.value))}
+                min={0}
+              />
+              <Input
+                label="Toko / Supplier"
+                value={editLogSupplier}
+                onChange={(e) => setEditLogSupplier(e.target.value)}
+              />
+            </>
+          )}
+          {(editingLog?.type === 'KELUAR' || editingLog?.type === 'TERPAKAI') && (
+            <Input
+              label="Tujuan / Peruntukan Pekerjaan"
+              value={editLogPurpose}
+              onChange={(e) => setEditLogPurpose(e.target.value)}
+            />
+          )}
+          <div>
+            <label className="block text-xs font-bold text-[#0F172A] uppercase mb-1">
+              Catatan / Keterangan
+            </label>
+            <textarea
+              className="w-full px-3 py-2 rounded-xl border-2 border-[#0F172A] text-xs font-semibold focus:outline-none"
+              rows={3}
+              value={editLogNotes}
+              onChange={(e) => setEditLogNotes(e.target.value)}
+            />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <Button
+              type="button"
+              variant="ghost"
+              className="flex-1"
+              onClick={() => setShowEditLogModal(false)}
+            >
+              Batal
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              className="flex-1"
+              disabled={isUpdatingLog}
+            >
+              {isUpdatingLog ? 'Menyimpan...' : 'Simpan Perubahan'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* CONFIRM DELETE LOG MODAL */}
+      <Modal
+        isOpen={showConfirmDeleteLogModal}
+        onClose={() => setShowConfirmDeleteLogModal(false)}
+        title="Konfirmasi Hapus Log Material"
+      >
+        <div className="space-y-4">
+          <p className="text-sm font-semibold text-[#475569] leading-normal select-none">
+            Apakah Anda yakin ingin menghapus log material ini? Stok material di gudang akan disesuaikan otomatis.
+          </p>
+          {deletingLog && (
+            <div className="p-3 bg-[#FAF8FF] border border-[#0F172A] rounded-xl text-xs font-bold select-all">
+              <span className="text-[#64748B]">Material:</span> {deletingLog.materialName} <br />
+              <span className="text-[#64748B]">Tipe Log:</span> {deletingLog.type} <br />
+              <span className="text-[#64748B]">Jumlah:</span> {deletingLog.amount} {deletingLog.unit} <br />
+              <span className="text-[#64748B]">Tanggal:</span> {formatTanggal(deletingLog.date)}
+            </div>
+          )}
+          <div className="flex gap-3 pt-2 select-none">
+            <Button variant="ghost" className="flex-1" onClick={() => setShowConfirmDeleteLogModal(false)}>Batal</Button>
+            <Button variant="danger" className="flex-1" onClick={confirmDeleteLog}>Hapus Log</Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };
@@ -778,14 +963,25 @@ export const InventoryView: React.FC = () => {
 
 // --- VIEW 3: KEUANGAN VIEW & LEDGER ---
 export const FinanceView: React.FC = () => {
-  const { state, deleteTransaction } = useApp();
+  const { state, deleteTransaction, updateTransaction } = useApp();
   const activeProj = state.projects.find(p => p.id === state.activeProjectId);
   const [activeFilter, setActiveFilter] = useState<'SEMUA' | 'DANA_MASUK' | 'PENGELUARAN' | 'UPAH_TUKANG'>('SEMUA');
   
-  // States for confirmation delete
+  // States for confirmation delete and edit modal
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   const [showPrintModal, setShowPrintModal] = useState(false);
+
+  // Edit Transaction states
+  const [editingTx, setEditingTx] = useState<Transaction | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editAmount, setEditAmount] = useState<number>(0);
+  const [editCategory, setEditCategory] = useState<string>('');
+  const [editRecipient, setEditRecipient] = useState<string>('');
+  const [editNotes, setEditNotes] = useState<string>('');
+  const [editDate, setEditDate] = useState<string>('');
+  const [editType, setEditType] = useState<'DANA_MASUK' | 'PENGELUARAN' | 'UPAH_TUKANG'>('PENGELUARAN');
+  const [isUpdatingTx, setIsUpdatingTx] = useState(false);
 
   if (!activeProj) {
     return <div className="text-center py-8">Pilih proyek aktif terlebih dahulu.</div>;
@@ -814,6 +1010,40 @@ export const FinanceView: React.FC = () => {
     name: k,
     amount: categoriesMap[k]
   })).sort((a, b) => b.amount - a.amount);
+
+  const handleEditClick = (tx: Transaction) => {
+    setEditingTx(tx);
+    setEditAmount(tx.amount);
+    setEditCategory(tx.category);
+    setEditRecipient(tx.sourceOrRecipient);
+    setEditNotes(tx.notes || '');
+    setEditDate(tx.date);
+    setEditType(tx.type);
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTx) return;
+    setIsUpdatingTx(true);
+    try {
+      await updateTransaction({
+        id: editingTx.id,
+        amount: Number(editAmount) || 0,
+        category: editCategory,
+        sourceOrRecipient: editRecipient,
+        notes: editNotes,
+        date: editDate,
+        type: editType
+      });
+      setShowEditModal(false);
+      setEditingTx(null);
+    } catch (err) {
+      // Error notification handled inside updateTransaction
+    } finally {
+      setIsUpdatingTx(false);
+    }
+  };
 
   const handleDeleteClick = (tx: Transaction) => {
     setSelectedTx(tx);
@@ -976,6 +1206,13 @@ export const FinanceView: React.FC = () => {
                   
                   <div className="flex items-center gap-1.5">
                     <button
+                      onClick={() => handleEditClick(tx)}
+                      className="p-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 transition-all cursor-pointer"
+                      title="Edit Transaksi"
+                    >
+                      ✏️
+                    </button>
+                    <button
                       onClick={() => handleDeleteClick(tx)}
                       className="p-1.5 rounded-lg border border-red-200 text-[#EF4444] hover:bg-red-50 hover:border-[#EF4444] transition-all cursor-pointer"
                       title="Hapus"
@@ -1018,6 +1255,72 @@ export const FinanceView: React.FC = () => {
             <Button variant="danger" className="flex-1" onClick={confirmDelete}>Hapus Sekarang</Button>
           </div>
         </div>
+      </Modal>
+
+      {/* Modal Edit Transaksi */}
+      <Modal
+        isOpen={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        title={`Edit Transaksi: ${editingTx?.type === 'DANA_MASUK' ? 'Dana Masuk' : editingTx?.type === 'UPAH_TUKANG' ? 'Upah Tukang' : 'Pengeluaran'}`}
+      >
+        <form onSubmit={handleSaveEdit} className="space-y-4">
+          <Input
+            label="Tanggal Transaksi"
+            type="date"
+            value={editDate}
+            onChange={(e) => setEditDate(e.target.value)}
+            required
+          />
+          <Input
+            label="Nominal (Rp)"
+            type="number"
+            value={editAmount}
+            onChange={(e) => setEditAmount(Number(e.target.value))}
+            required
+            min={0}
+          />
+          <Input
+            label={editType === 'DANA_MASUK' ? 'Sumber Dana' : 'Penerima / Toko / Worker'}
+            value={editRecipient}
+            onChange={(e) => setEditRecipient(e.target.value)}
+            required
+          />
+          <Input
+            label="Kategori"
+            value={editCategory}
+            onChange={(e) => setEditCategory(e.target.value)}
+            required
+          />
+          <div>
+            <label className="block text-xs font-bold text-[#0F172A] uppercase mb-1">
+              Catatan / Keterangan
+            </label>
+            <textarea
+              className="w-full px-3 py-2 rounded-xl border-2 border-[#0F172A] text-xs font-semibold focus:outline-none"
+              rows={3}
+              value={editNotes}
+              onChange={(e) => setEditNotes(e.target.value)}
+            />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <Button
+              type="button"
+              variant="ghost"
+              className="flex-1"
+              onClick={() => setShowEditModal(false)}
+            >
+              Batal
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              className="flex-1"
+              disabled={isUpdatingTx}
+            >
+              {isUpdatingTx ? 'Menyimpan...' : 'Simpan Perubahan'}
+            </Button>
+          </div>
+        </form>
       </Modal>
 
       {/* Unified Print & PDF Export Modal */}
@@ -2676,7 +2979,9 @@ export const SettingsView: React.FC = () => {
   // 12. EDIT PROFIL & 4. UPLOAD & 5. URL FOTO & 7. GANTI FOTO
   const handleProfileSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    const currentUser_id = state.currentUser?.id || 'MDR-PAUJI';
+    const currentUser_id = (state.currentUser?.id && isUuidFormat(state.currentUser?.id))
+      ? state.currentUser.id
+      : ((await getMandorUuid(state.currentUser?.name)) || '');
     let finalPhotoUrl = currentAvatarUrl;
 
     if (isSupabaseConfigured) {
@@ -2829,7 +3134,9 @@ export const SettingsView: React.FC = () => {
       return;
     }
 
-    const currentUser_id = state.currentUser?.id || 'MDR-PAUJI';
+    const currentUser_id = (state.currentUser?.id && isUuidFormat(state.currentUser?.id))
+      ? state.currentUser.id
+      : ((await getMandorUuid(state.currentUser?.name)) || '');
 
     if (isSupabaseConfigured) {
       setAvatarDeleting(true);

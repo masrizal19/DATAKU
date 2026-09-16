@@ -49,15 +49,16 @@ const isUUID = (str?: string): boolean => {
 };
 
 export const projectService = {
-  async getProjects(): Promise<SupabaseProject[]> {
+  async getProjects(mandorId?: string): Promise<SupabaseProject[]> {
     if (!isSupabaseConfigured) {
       console.warn('Supabase belum terkonfigurasi. Memeriksa kredensial...');
       return [];
     }
-    const { data, error } = await supabase
-      .from('projects')
-      .select('*')
-      .order('created_at', { ascending: false });
+    let query = supabase.from('projects').select('*');
+    if (mandorId && isUUID(mandorId)) {
+      query = query.or(`created_by.eq.${mandorId},created_by.is.null`);
+    }
+    const { data, error } = await query.order('created_at', { ascending: false });
 
     if (error) {
       console.error('Gagal mengambil data proyek dari Supabase:', {

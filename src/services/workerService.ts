@@ -1,6 +1,7 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { Worker, MasterWorker } from '../types';
 import { DatakuProjectWeek } from './projectWeekService';
+import { getMandorUuid, isUuidFormat } from './userService';
 
 export interface DatakuWorker {
   id: string;
@@ -104,7 +105,10 @@ export const workerService = {
     if (!isSupabaseConfigured) {
       throw new Error('Supabase database tidak terkonfigurasi.');
     }
-    const mandorId = worker.mandor_id || localStorage.getItem('dataku_mandor_id') || 'MDR-PAUJI';
+    let mandorId = (worker.mandor_id && isUuidFormat(worker.mandor_id)) ? worker.mandor_id : await getMandorUuid();
+    if (!mandorId || !isUuidFormat(mandorId)) {
+      throw new Error('Mandor ID tidak valid.');
+    }
     const { data, error } = await supabase
       .from('dataku_workers')
       .insert({
@@ -414,6 +418,24 @@ export const workerService = {
       throw error;
     }
     return data as DatakuWorkerPayment;
+  },
+
+  async deleteWorkerPayment(id: string): Promise<void> {
+    if (!isSupabaseConfigured) {
+      throw new Error('Supabase database tidak terkonfigurasi.');
+    }
+    if (!isUuidFormat(id)) {
+      throw new Error('Payment ID tidak valid.');
+    }
+    const { error } = await supabase
+      .from('dataku_worker_payments')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      console.error('Error deleting dataku_worker_payment:', error);
+      throw error;
+    }
   }
 };
 

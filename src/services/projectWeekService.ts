@@ -17,16 +17,16 @@ export const projectWeekService = {
   /**
    * Fetch weeks for a project directly from public.dataku_project_weeks
    */
-  async getProjectWeeks(projectId: string): Promise<DatakuProjectWeek[]> {
-    if (!isSupabaseConfigured || !projectId) {
+  async getProjectWeeks(projectId?: string): Promise<DatakuProjectWeek[]> {
+    if (!isSupabaseConfigured) {
       return [];
     }
     try {
-      const { data, error } = await supabase
-        .from('dataku_project_weeks')
-        .select('*')
-        .eq('project_id', String(projectId))
-        .order('week_number', { ascending: true });
+      let query = supabase.from('dataku_project_weeks').select('*');
+      if (projectId) {
+        query = query.eq('project_id', String(projectId));
+      }
+      const { data, error } = await query.order('week_number', { ascending: true });
 
       if (error) {
         console.error('Error fetching dataku_project_weeks:', error);

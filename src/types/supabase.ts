@@ -40,7 +40,8 @@ export interface SupabaseFund {
 export interface SupabaseTransaction {
   id: string;
   project_id: string;
-  type: 'income' | 'expense';
+  transaction_type: 'income' | 'expense' | string;
+  type?: string;
   category: string;
   amount: number;
   recipient: string;
@@ -68,7 +69,8 @@ export interface SupabaseMaterialTransaction {
   id: string;
   project_id: string;
   material_id: string;
-  type: 'in' | 'out' | 'used';
+  transaction_type: 'in' | 'out' | 'used' | string;
+  type?: string;
   quantity: number;
   unit_price?: number;
   supplier?: string;
