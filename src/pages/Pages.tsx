@@ -44,7 +44,6 @@ import {
   GoogleSheetsConnection
 } from '../services/googleSheetsService';
 import { getCurrentProjectWeek, getProjectWeeks } from '../utils/datetime';
-import { masterWorkersList } from '../mock/data';
 
 /// --- VIEW 1: DASHBOARD VIEW ---
 interface DashboardViewProps {
@@ -1039,7 +1038,7 @@ interface WorkersViewProps {
 }
 
 export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPayWorkerClick }) => {
-  const { state, updateWorker, deleteWorker, addWorker } = useApp();
+  const { state, updateWorker, deleteWorker, addWorker, masterWorkers } = useApp();
   const activeProj = state.projects.find(p => p.id === state.activeProjectId);
 
   // States for Payroll / Receipt Modal Details
@@ -1839,77 +1838,94 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
                 🎯 Target Penugasan: <b className="text-sky-800 uppercase">{selectedWeek === 'all' ? 'Minggu 2' : `Minggu ${selectedWeek}`}</b>
               </span>
               <span className="text-[10px] text-[#64748B] font-extrabold">
-                {masterWorkersList.length} Tukang Terdaftar di Master
+                {masterWorkers.length} Tukang Terdaftar di Master
               </span>
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {masterWorkersList.map((mw) => {
-                const targetW = selectedWeek === 'all' ? 2 : selectedWeek;
-                const isAssigned = projWorkers.some(
-                  pw => (pw.masterWorkerId === mw.id || pw.name.toLowerCase() === mw.name.toLowerCase()) && 
-                        ((pw.weekNumber === targetW) || (!pw.weekNumber && targetW === 2))
-                );
-
-                return (
-                  <div
-                    key={mw.id}
-                    className={`p-3 rounded-xl border-2 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                      isAssigned
-                        ? 'bg-slate-50 border-slate-300 opacity-80'
-                        : 'bg-white border-[#0F172A] hover:shadow-neo-sm'
-                    }`}
+              {masterWorkers.length === 0 ? (
+                <div className="text-center py-8 bg-slate-50 border border-dashed border-slate-300 rounded-xl p-4">
+                  <p className="text-xs font-bold text-slate-600">Belum ada data Master Tukang di database Supabase.</p>
+                  <p className="text-[10px] text-slate-400 mt-1">Gunakan tombol "+ Tambah Pekerja" untuk menambahkan tukang ke proyek.</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowMasterWorkerModal(false);
+                      onAddWorkerClick();
+                    }}
+                    className="mt-3 px-3 py-1.5 bg-[#0284C7] hover:bg-sky-700 text-white rounded-lg text-xs font-extrabold cursor-pointer transition-all shadow-neo-sm"
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-amber-50 border border-[#0F172A] flex items-center justify-center text-lg shrink-0">
-                        👷
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h5 className="font-bold text-xs text-[#0F172A] uppercase">{mw.name}</h5>
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-slate-100 text-slate-700 border border-slate-300">
-                            {mw.specialty}
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-slate-500 font-bold mt-0.5">
-                          {mw.position} • {formatRupiah(mw.dailyRate)}/hari • {mw.phone}
-                        </p>
-                      </div>
-                    </div>
+                    + Tambah Pekerja Baru
+                  </button>
+                </div>
+              ) : (
+                masterWorkers.map((mw) => {
+                  const targetW = selectedWeek === 'all' ? 2 : selectedWeek;
+                  const isAssigned = projWorkers.some(
+                    pw => (pw.masterWorkerId === mw.id || pw.name.toLowerCase() === mw.name.toLowerCase()) && 
+                          ((pw.weekNumber === targetW) || (!pw.weekNumber && targetW === 2))
+                  );
 
-                    <div className="shrink-0 flex items-center justify-end">
-                      {isAssigned ? (
-                        <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-[10px] font-black uppercase">
-                          ✓ Sudah Ditugaskan
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const weekObj = projectWeeks.find(p => p.weekNumber === targetW);
-                            addWorker({
-                              name: mw.name,
-                              position: mw.position,
-                              dailyRate: mw.dailyRate,
-                              daysWorked: 6,
-                              status: 'BELUM_DIBAYAR',
-                              paymentMethod: 'Tunai',
-                              weekNumber: targetW,
-                              weekStartDate: weekObj?.startDate || '2026-09-08',
-                              weekEndDate: weekObj?.endDate || '2026-09-14',
-                              masterWorkerId: mw.id,
-                              notes: `Penugasan Master Tukang (${mw.specialty})`
-                            });
-                          }}
-                          className="px-3 py-1.5 bg-[#0284C7] hover:bg-sky-700 text-white rounded-lg text-xs font-extrabold transition-all cursor-pointer shadow-neo-sm flex items-center gap-1"
-                        >
-                          + Tugaskan Minggu {targetW}
-                        </button>
-                      )}
+                  return (
+                    <div
+                      key={mw.id}
+                      className={`p-3 rounded-xl border-2 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                        isAssigned
+                          ? 'bg-slate-50 border-slate-300 opacity-80'
+                          : 'bg-white border-[#0F172A] hover:shadow-neo-sm'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-amber-50 border border-[#0F172A] flex items-center justify-center text-lg shrink-0">
+                          👷
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h5 className="font-bold text-xs text-[#0F172A] uppercase">{mw.name}</h5>
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-slate-100 text-slate-700 border border-slate-300">
+                              {mw.specialty}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 font-bold mt-0.5">
+                            {mw.position} • {formatRupiah(mw.dailyRate)}/hari • {mw.phone}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="shrink-0 flex items-center justify-end">
+                        {isAssigned ? (
+                          <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-[10px] font-black uppercase">
+                            ✓ Sudah Ditugaskan
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const weekObj = projectWeeks.find(p => p.weekNumber === targetW);
+                              addWorker({
+                                name: mw.name,
+                                position: mw.position,
+                                dailyRate: mw.dailyRate,
+                                daysWorked: 6,
+                                status: 'BELUM_DIBAYAR',
+                                paymentMethod: 'Tunai',
+                                weekNumber: targetW,
+                                weekStartDate: weekObj?.startDate || '2026-09-08',
+                                weekEndDate: weekObj?.endDate || '2026-09-14',
+                                masterWorkerId: mw.id,
+                                notes: `Penugasan Master Tukang (${mw.specialty})`
+                              });
+                            }}
+                            className="px-3 py-1.5 bg-[#0284C7] hover:bg-sky-700 text-white rounded-lg text-xs font-extrabold transition-all cursor-pointer shadow-neo-sm flex items-center gap-1"
+                          >
+                            + Tugaskan Minggu {targetW}
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
 
             <div className="p-3 bg-slate-50 border-t-2 border-[#0F172A] flex justify-between items-center text-xs">

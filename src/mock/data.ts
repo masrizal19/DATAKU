@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { User, Project, Transaction, Material, MaterialLog, Worker, DailyReport, Notification } from '../types';
+import { User, Project, Transaction, Material, MaterialLog, Worker, MasterWorker, DailyReport, Notification } from '../types';
 
 export const initialCurrentUser: User = {
   name: 'Mandor Ucuk',
@@ -179,155 +179,9 @@ export const initialTransactions: Transaction[] = [
   }
 ];
 
-export const masterWorkersList = [
-  { id: 'MST-001', name: 'Budi', position: 'Tukang Batu', dailyRate: 150000, phone: '081234567890', specialty: 'Pasang Bata & Plester' },
-  { id: 'MST-002', name: 'Agus', position: 'Kenek Adukan', dailyRate: 110000, phone: '081234567891', specialty: 'Adukan & Angkut' },
-  { id: 'MST-003', name: 'Joko', position: 'Tukang Kayu', dailyRate: 150000, phone: '081234567892', specialty: 'Bekisting & Rangka' },
-  { id: 'MST-004', name: 'Slamet', position: 'Tukang Besi', dailyRate: 150000, phone: '081234567893', specialty: 'Rakit Begel & Kolom' },
-  { id: 'MST-005', name: 'Rahmat', position: 'Kenek', dailyRate: 110000, phone: '081234567894', specialty: 'Bantu Tukang Besi' },
-  { id: 'MST-006', name: 'Dedi', position: 'Tukang Cat', dailyRate: 140000, phone: '081234567895', specialty: 'Cat & Finishing' }
-];
+export const masterWorkersList: MasterWorker[] = [];
 
-export const initialWorkers: Worker[] = [
-  // --- MINGGU 1 (1–7 September 2026) -> LUNAS ---
-  {
-    id: 'WRK-W1-001',
-    projectId: 'PRJ-MDN-2024-08',
-    name: 'Budi',
-    position: 'Tukang Batu',
-    daysWorked: 6,
-    dailyRate: 150000,
-    totalWages: 900000,
-    status: 'LUNAS',
-    paymentDate: '2026-09-07',
-    paymentMethod: 'Kas Tunai',
-    weekNumber: 1,
-    weekStartDate: '2026-09-01',
-    weekEndDate: '2026-09-07',
-    masterWorkerId: 'MST-001'
-  },
-  {
-    id: 'WRK-W1-002',
-    projectId: 'PRJ-MDN-2024-08',
-    name: 'Agus',
-    position: 'Kenek Adukan',
-    daysWorked: 6,
-    dailyRate: 110000,
-    totalWages: 660000,
-    status: 'LUNAS',
-    paymentDate: '2026-09-07',
-    paymentMethod: 'Kas Tunai',
-    weekNumber: 1,
-    weekStartDate: '2026-09-01',
-    weekEndDate: '2026-09-07',
-    masterWorkerId: 'MST-002'
-  },
-  {
-    id: 'WRK-W1-003',
-    projectId: 'PRJ-MDN-2024-08',
-    name: 'Joko',
-    position: 'Tukang Kayu',
-    daysWorked: 6,
-    dailyRate: 150000,
-    totalWages: 900000,
-    status: 'LUNAS',
-    paymentDate: '2026-09-07',
-    paymentMethod: 'Kas Tunai',
-    weekNumber: 1,
-    weekStartDate: '2026-09-01',
-    weekEndDate: '2026-09-07',
-    masterWorkerId: 'MST-003'
-  },
-
-  // --- MINGGU 2 (8–14 September 2026) -> Budi: BELUM_DIBAYAR, Slamet: SEBAGIAN, Rahmat: BELUM_DIBAYAR ---
-  {
-    id: 'WRK-W2-001',
-    projectId: 'PRJ-MDN-2024-08',
-    name: 'Budi',
-    position: 'Tukang Batu',
-    daysWorked: 6,
-    dailyRate: 150000,
-    totalWages: 900000,
-    status: 'BELUM_DIBAYAR',
-    weekNumber: 2,
-    weekStartDate: '2026-09-08',
-    weekEndDate: '2026-09-14',
-    masterWorkerId: 'MST-001'
-  },
-  {
-    id: 'WRK-W2-002',
-    projectId: 'PRJ-MDN-2024-08',
-    name: 'Slamet',
-    position: 'Tukang Besi',
-    daysWorked: 5,
-    dailyRate: 150000,
-    totalWages: 750000,
-    potongan: 250000, // kasbon
-    status: 'SEBAGIAN',
-    weekNumber: 2,
-    weekStartDate: '2026-09-08',
-    weekEndDate: '2026-09-14',
-    masterWorkerId: 'MST-004'
-  },
-  {
-    id: 'WRK-W2-003',
-    projectId: 'PRJ-MDN-2024-08',
-    name: 'Rahmat',
-    position: 'Kenek',
-    daysWorked: 6,
-    dailyRate: 110000,
-    totalWages: 660000,
-    status: 'BELUM_DIBAYAR',
-    weekNumber: 2,
-    weekStartDate: '2026-09-08',
-    weekEndDate: '2026-09-14',
-    masterWorkerId: 'MST-005'
-  },
-
-  // --- MINGGU 3 (15–21 September 2026) -> Slamet, Rahmat, Dedi ---
-  {
-    id: 'WRK-W3-001',
-    projectId: 'PRJ-MDN-2024-08',
-    name: 'Slamet',
-    position: 'Tukang Besi',
-    daysWorked: 6,
-    dailyRate: 150000,
-    totalWages: 900000,
-    status: 'BELUM_DIBAYAR',
-    weekNumber: 3,
-    weekStartDate: '2026-09-15',
-    weekEndDate: '2026-09-21',
-    masterWorkerId: 'MST-004'
-  },
-  {
-    id: 'WRK-W3-002',
-    projectId: 'PRJ-MDN-2024-08',
-    name: 'Rahmat',
-    position: 'Kenek',
-    daysWorked: 6,
-    dailyRate: 110000,
-    totalWages: 660000,
-    status: 'BELUM_DIBAYAR',
-    weekNumber: 3,
-    weekStartDate: '2026-09-15',
-    weekEndDate: '2026-09-21',
-    masterWorkerId: 'MST-005'
-  },
-  {
-    id: 'WRK-W3-003',
-    projectId: 'PRJ-MDN-2024-08',
-    name: 'Dedi',
-    position: 'Tukang Cat',
-    daysWorked: 5,
-    dailyRate: 140000,
-    totalWages: 700000,
-    status: 'BELUM_DIBAYAR',
-    weekNumber: 3,
-    weekStartDate: '2026-09-15',
-    weekEndDate: '2026-09-21',
-    masterWorkerId: 'MST-006'
-  }
-];
+export const initialWorkers: Worker[] = [];
 
 export const initialDailyReports: DailyReport[] = [
   {

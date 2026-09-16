@@ -6,7 +6,13 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { projectService, mapSupabaseProjectToProject } from '../services/projectService';
-import { AppState, User, Project, Transaction, Material, MaterialLog, Worker, DailyReport, Notification, MaterialCategory } from '../types';
+import {
+  workerService,
+  mapSupabaseToAppWorkers,
+  mapToMasterWorker,
+  DatakuWorker
+} from '../services/workerService';
+import { AppState, User, Project, Transaction, Material, MaterialLog, Worker, MasterWorker, DailyReport, Notification, MaterialCategory } from '../types';
 import {
   initialCurrentUser,
   initialProjects,
@@ -20,6 +26,8 @@ import {
 
 interface AppContextType {
   state: AppState;
+  masterWorkers: MasterWorker[];
+  loadWorkers: () => Promise<void>;
   loginUser: (emailOrPhone: string) => void;
   logoutUser: () => void;
   addProject: (proj: Omit<Project, 'id' | 'isArchived' | 'isActive'>) => Promise<void> | void;
@@ -32,16 +40,16 @@ interface AppContextType {
   addBarangMasuk: (log: { name: string; category: MaterialCategory; amount: number; unit: string; pricePerUnit: number; supplier: string; notes: string; photos: string[]; date: string; payWithProjectFunds: boolean }) => void;
   addBarangKeluar: (log: { materialId: string; amount: number; purposeOrWork: string; usedBy: string; notes: string; photos: string[]; date: string }) => void;
   addBarangTerpakai: (log: { materialId: string; amount: number; purposeOrWork: string; location: string; notes: string; photos: string[]; date: string }) => void;
-  payWorker: (workerId: string, amountPaid: number, method: string) => void;
-  addWorker: (worker: Omit<Worker, 'id' | 'projectId' | 'totalWages'>) => void;
+  payWorker: (workerId: string, amountPaid: number, method: string) => Promise<void> | void;
+  addWorker: (worker: Omit<Worker, 'id' | 'projectId' | 'totalWages'>) => Promise<void> | void;
   addDailyReport: (report: Omit<DailyReport, 'id' | 'projectId'>) => void;
   deleteTransaction: (id: string) => void;
   deleteDailyReport: (id: string) => void;
   markNotificationsRead: () => void;
   triggerNotification: (message: string, type: 'WARNING' | 'ALERT' | 'INFO') => void;
   clearAllState: () => void;
-  updateWorker: (worker: Worker) => void;
-  deleteWorker: (id: string) => void;
+  updateWorker: (worker: Worker) => Promise<void> | void;
+  deleteWorker: (id: string) => Promise<void> | void;
   updateMaterial: (mat: Material) => void;
   deleteMaterial: (id: string) => void;
   updateCurrentUser: (user: User) => void;
@@ -54,6 +62,8 @@ const LOCAL_STORAGE_KEY = 'DATAKU_APP_STATE';
 const ACTIVE_PROJECT_KEY = 'dataku_active_project_id';
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [masterWorkers, setMasterWorkers] = useState<MasterWorker[]>([]);
+
   const [state, setState] = useState<AppState>(() => {
     const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
     const isAuthenticated = localStorage.getItem("dataku_auth") === "true";
@@ -77,7 +87,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           transactions: initialTransactions,
           materials: initialMaterials,
           materialLogs: initialMaterialLogs,
-          workers: initialWorkers,
+          workers: [],
           dailyReports: initialDailyReports,
           notifications: initialNotifications
         };
@@ -90,7 +100,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         transactions: initialTransactions,
         materials: initialMaterials,
         materialLogs: initialMaterialLogs,
-        workers: initialWorkers,
+        workers: [],
         dailyReports: initialDailyReports,
         notifications: initialNotifications
       };
@@ -149,6 +159,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [state.activeProjectId]);
 
+  // Load Workers, Week Workers, and Payments directly from Supabase
+  const loadWorkers = useCallback(async () => {
+    if (!isSupabaseConfigured) return;
+    try {
+      const [rawMaster, rawWeek, rawPayments] = await Promise.all([
+        workerService.getMasterWorkers(),
+        workerService.getWeekWorkers(),
+        workerService.getWorkerPayments()
+      ]);
+
+      const mappedMaster = rawMaster.map(mapToMasterWorker);
+      setMasterWorkers(mappedMaster);
+
+      const mappedAppWorkers = mapSupabaseToAppWorkers(rawWeek, rawMaster, rawPayments);
+
+      setState(prev => ({
+        ...prev,
+        workers: mappedAppWorkers
+      }));
+    } catch (err) {
+      console.error('Gagal memuat data pekerja dari Supabase:', err);
+    }
+  }, []);
+
   // Initial load and Realtime synchronization for public.projects
   useEffect(() => {
     loadProjects();
@@ -174,6 +208,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       supabase.removeChannel(channel);
     };
   }, [loadProjects]);
+
+  // Realtime synchronization for public.dataku_workers, public.dataku_week_workers, and public.dataku_worker_payments
+  useEffect(() => {
+    loadWorkers();
+
+    if (!isSupabaseConfigured) return;
+
+    const channel = supabase
+      .channel('public:workers_realtime_sync')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'dataku_workers'
+        },
+        () => {
+          loadWorkers();
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'dataku_week_workers'
+        },
+        () => {
+          loadWorkers();
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'dataku_worker_payments'
+        },
+        () => {
+          loadWorkers();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadWorkers]);
 
   // Save to local storage whenever state changes
   useEffect(() => {
@@ -650,30 +732,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // 6. PAY WORKER
-  const payWorker = (workerId: string, amountPaid: number, method: string) => {
+  const payWorker = async (workerId: string, amountPaid: number, method: string) => {
     if (!state.activeProjectId) return;
-    
-    setState(prev => {
-      const worker = prev.workers.find(w => w.id === workerId);
-      if (!worker) return prev;
+    const worker = state.workers.find(w => w.id === workerId);
+    if (!worker) return;
 
-      // Hitung status pembayaran
-      // Worker wages are totalWages
-      let newStatus: 'BELUM_DIBAYAR' | 'SEBAGIAN' | 'LUNAS' = worker.status;
-      if (amountPaid >= worker.totalWages) {
-        newStatus = 'LUNAS';
-      } else if (amountPaid > 0) {
-        newStatus = 'SEBAGIAN';
+    let newStatus: 'BELUM_DIBAYAR' | 'SEBAGIAN' | 'LUNAS' = worker.status;
+    if (amountPaid >= worker.totalWages) {
+      newStatus = 'LUNAS';
+    } else if (amountPaid > 0) {
+      newStatus = 'SEBAGIAN';
+    }
+
+    try {
+      if (isSupabaseConfigured) {
+        await workerService.createWorkerPayment({
+          project_id: String(state.activeProjectId),
+          week_worker_id: worker.id,
+          worker_id: worker.masterWorkerId || worker.id,
+          amount: amountPaid,
+          payment_method: method,
+          notes: `Pembayaran Upah untuk ${worker.name} (${worker.position})`
+        });
+
+        await workerService.updateWeekWorker(worker.id, {
+          payment_status: newStatus
+        });
+
+        await loadWorkers();
+      } else {
+        setState(prev => ({
+          ...prev,
+          workers: prev.workers.map(w => w.id === workerId ? { ...w, status: newStatus } : w)
+        }));
       }
-
-      const updatedWorkers = prev.workers.map(w => 
-        w.id === workerId ? { ...w, status: newStatus } : w
-      );
 
       // Record transaction
       const newTx: Transaction = {
         id: `TX-${Date.now().toString().slice(-5)}`,
-        projectId: prev.activeProjectId!,
+        projectId: state.activeProjectId,
         type: 'UPAH_TUKANG',
         date: new Date().toISOString(),
         amount: amountPaid,
@@ -685,32 +782,74 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         status: newStatus
       };
 
-      return {
+      setState(prev => ({
         ...prev,
-        workers: updatedWorkers,
         transactions: [newTx, ...prev.transactions]
-      };
-    });
+      }));
 
-    triggerNotification('Pembayaran Upah Tukang berhasil dicatat.', 'INFO');
+      triggerNotification(`Pembayaran upah ${worker.name} berhasil dicatat.`, 'INFO');
+    } catch (err: any) {
+      console.error('Failed to pay worker:', err);
+      triggerNotification(`Gagal mencatat pembayaran: ${err.message || 'Error'}`, 'WARNING');
+    }
   };
 
-  const addWorker = (worker: Omit<Worker, 'id' | 'projectId' | 'totalWages'>) => {
+  const addWorker = async (worker: Omit<Worker, 'id' | 'projectId' | 'totalWages'>) => {
     if (!state.activeProjectId) return;
-    const newId = `WRK-${Date.now().toString().slice(-4)}`;
-    const newWorker: Worker = {
-      ...worker,
-      id: newId,
-      projectId: state.activeProjectId,
-      totalWages: worker.daysWorked * worker.dailyRate
-    };
+    const currentMandorId = state.currentUser?.id || localStorage.getItem('dataku_mandor_id') || 'MDR-PAUJI';
 
-    setState(prev => ({
-      ...prev,
-      workers: [...prev.workers, newWorker]
-    }));
+    try {
+      if (isSupabaseConfigured) {
+        let mWorker = masterWorkers.find(
+          mw => mw.name.trim().toLowerCase() === worker.name.trim().toLowerCase()
+        );
+        let mWorkerId = worker.masterWorkerId || mWorker?.id;
 
-    triggerNotification(`Pekerja ${worker.name} berhasil ditambahkan.`, 'INFO');
+        if (!mWorkerId) {
+          const created = await workerService.createMasterWorker({
+            mandor_id: currentMandorId,
+            name: worker.name.trim(),
+            job_type: worker.position,
+            daily_rate: worker.dailyRate,
+            is_active: true
+          });
+          mWorkerId = created.id;
+        }
+
+        const targetWeek = worker.weekNumber || 2;
+        const notes = worker.notes || `Minggu ${targetWeek}`;
+
+        await workerService.assignWorkerToWeek({
+          project_id: String(state.activeProjectId),
+          worker_id: mWorkerId,
+          job_type: worker.position,
+          daily_rate: worker.dailyRate,
+          work_days: worker.daysWorked,
+          total_wage: (worker.daysWorked * worker.dailyRate) + (worker.bonus || 0) - (worker.potongan || 0),
+          payment_status: worker.status || 'BELUM_DIBAYAR',
+          notes: notes
+        });
+
+        await loadWorkers();
+      } else {
+        const newId = `WRK-${Date.now().toString().slice(-4)}`;
+        const newWorker: Worker = {
+          ...worker,
+          id: newId,
+          projectId: state.activeProjectId,
+          totalWages: (worker.daysWorked * worker.dailyRate) + (worker.bonus || 0) - (worker.potongan || 0)
+        };
+        setState(prev => ({
+          ...prev,
+          workers: [...prev.workers, newWorker]
+        }));
+      }
+
+      triggerNotification(`Pekerja ${worker.name} berhasil ditambahkan.`, 'INFO');
+    } catch (err: any) {
+      console.error('Failed to add worker:', err);
+      triggerNotification(`Gagal menambahkan pekerja: ${err.message || 'Error'}`, 'WARNING');
+    }
   };
 
   // 7. DAILY REPORT
@@ -790,36 +929,64 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       transactions: initialTransactions,
       materials: initialMaterials,
       materialLogs: initialMaterialLogs,
-      workers: initialWorkers,
+      workers: [],
       dailyReports: initialDailyReports,
       notifications: initialNotifications
     });
     loadProjects();
+    loadWorkers();
   };
 
-  const updateWorker = (updatedWorker: Worker) => {
-    setState(prev => ({
-      ...prev,
-      workers: prev.workers.map(w => w.id === updatedWorker.id ? updatedWorker : w)
-    }));
-  };
-
-  const deleteWorker = (id: string) => {
-    setState(prev => ({
-      ...prev,
-      workers: prev.workers.filter(w => w.id !== id)
-    }));
-
-    const tryDeleteSupabase = async () => {
+  const updateWorker = async (updatedWorker: Worker) => {
+    try {
       if (isSupabaseConfigured) {
-        try {
-          await supabase.from('workers').delete().eq('id', id);
-        } catch (dbErr) {
-          console.error('Failed to delete worker from Supabase:', dbErr);
+        await workerService.updateWeekWorker(updatedWorker.id, {
+          work_days: updatedWorker.daysWorked,
+          daily_rate: updatedWorker.dailyRate,
+          total_wage: (updatedWorker.daysWorked * updatedWorker.dailyRate) + (updatedWorker.bonus || 0) - (updatedWorker.potongan || 0),
+          payment_status: updatedWorker.status,
+          notes: updatedWorker.notes,
+          job_type: updatedWorker.position
+        });
+
+        if (updatedWorker.masterWorkerId) {
+          await workerService.updateMasterWorker(updatedWorker.masterWorkerId, {
+            name: updatedWorker.name,
+            daily_rate: updatedWorker.dailyRate,
+            job_type: updatedWorker.position
+          });
         }
+
+        await loadWorkers();
+      } else {
+        setState(prev => ({
+          ...prev,
+          workers: prev.workers.map(w => w.id === updatedWorker.id ? updatedWorker : w)
+        }));
       }
-    };
-    tryDeleteSupabase();
+      triggerNotification(`Data upah ${updatedWorker.name} berhasil diperbarui.`, 'INFO');
+    } catch (err: any) {
+      console.error('Failed to update worker:', err);
+      triggerNotification(`Gagal memperbarui data pekerja: ${err.message || 'Error'}`, 'WARNING');
+    }
+  };
+
+  const deleteWorker = async (id: string) => {
+    try {
+      if (isSupabaseConfigured) {
+        await workerService.deleteWeekWorker(id);
+        await loadWorkers();
+      } else {
+        setState(prev => ({
+          ...prev,
+          workers: prev.workers.filter(w => w.id !== id)
+        }));
+      }
+      triggerNotification('Pekerja berhasil dihapus dari daftar.', 'INFO');
+    } catch (err: any) {
+      console.error('Failed to delete worker:', err);
+      triggerNotification(`Gagal menghapus pekerja: ${err.message || 'Error'}`, 'WARNING');
+    }
   };
 
   const updateMaterial = (updatedMat: Material) => {
@@ -875,6 +1042,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     <AppContext.Provider
       value={{
         state,
+        masterWorkers,
+        loadWorkers,
         loginUser,
         logoutUser,
         addProject,
