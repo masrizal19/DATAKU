@@ -478,9 +478,13 @@ const MainAppContent: React.FC = () => {
 
         {activeSheet === 'buat_proyek' && (
           <ProyekForm
-            onSubmit={(data) => {
-              addProject(data);
-              setActiveSheet(null);
+            onSubmit={async (data) => {
+              try {
+                await addProject(data);
+                setActiveSheet(null);
+              } catch {
+                // error is notified through toast
+              }
             }}
             onCancel={() => setActiveSheet(null)}
           />

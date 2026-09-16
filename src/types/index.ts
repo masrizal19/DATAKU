@@ -25,6 +25,9 @@ export interface Project {
   notes: string;
   isArchived: boolean;
   isActive: boolean;
+  createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export type TransactionType = 'DANA_MASUK' | 'PENGELUARAN' | 'UPAH_TUKANG';

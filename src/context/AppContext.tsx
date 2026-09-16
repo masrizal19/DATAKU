@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { projectService, mapSupabaseProjectToProject } from '../services/projectService';
 import { AppState, User, Project, Transaction, Material, MaterialLog, Worker, DailyReport, Notification, MaterialCategory } from '../types';
 import {
   initialCurrentUser,
@@ -21,11 +22,11 @@ interface AppContextType {
   state: AppState;
   loginUser: (emailOrPhone: string) => void;
   logoutUser: () => void;
-  addProject: (proj: Omit<Project, 'id' | 'isArchived' | 'isActive'>) => void;
+  addProject: (proj: Omit<Project, 'id' | 'isArchived' | 'isActive'>) => Promise<void> | void;
   setActiveProject: (id: string) => void;
-  archiveProject: (id: string) => void;
-  updateProject: (proj: Project) => void;
-  deleteProject: (id: string) => void;
+  archiveProject: (id: string) => Promise<void> | void;
+  updateProject: (proj: Project) => Promise<void> | void;
+  deleteProject: (id: string) => Promise<void> | void;
   addDanaMasuk: (tx: { amount: number; category: string; sourceOrRecipient: string; paymentMethod: string; notes: string; photos: string[]; date: string }) => void;
   addPengeluaran: (tx: { amount: number; category: string; sourceOrRecipient: string; paymentMethod: string; notes: string; photos: string[]; date: string }) => void;
   addBarangMasuk: (log: { name: string; category: MaterialCategory; amount: number; unit: string; pricePerUnit: number; supplier: string; notes: string; photos: string[]; date: string; payWithProjectFunds: boolean }) => void;
@@ -50,23 +51,29 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 const LOCAL_STORAGE_KEY = 'DATAKU_APP_STATE';
+const ACTIVE_PROJECT_KEY = 'dataku_active_project_id';
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [state, setState] = useState<AppState>(() => {
     const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
     const isAuthenticated = localStorage.getItem("dataku_auth") === "true";
     const loggedUser = localStorage.getItem("dataku_user") || "PAUJI";
+    const savedActiveProject = localStorage.getItem(ACTIVE_PROJECT_KEY) || null;
     
     let loadedState: AppState;
     if (saved) {
       try {
         loadedState = JSON.parse(saved);
+        // Ensure projects are initialized cleanly if empty
+        if (!Array.isArray(loadedState.projects)) {
+          loadedState.projects = [];
+        }
       } catch (e) {
         console.error('Error parsing saved state', e);
         loadedState = {
           currentUser: null,
-          projects: initialProjects,
-          activeProjectId: 'PRJ-MDN-2024-08',
+          projects: [],
+          activeProjectId: savedActiveProject,
           transactions: initialTransactions,
           materials: initialMaterials,
           materialLogs: initialMaterialLogs,
@@ -78,8 +85,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } else {
       loadedState = {
         currentUser: null,
-        projects: initialProjects,
-        activeProjectId: 'PRJ-MDN-2024-08',
+        projects: [],
+        activeProjectId: savedActiveProject,
         transactions: initialTransactions,
         materials: initialMaterials,
         materialLogs: initialMaterialLogs,
@@ -102,6 +109,71 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     return loadedState;
   });
+
+  // Load Projects directly from Supabase
+  const loadProjects = useCallback(async () => {
+    if (!isSupabaseConfigured) return;
+    try {
+      const data = await projectService.getProjects();
+      const currentActiveId = localStorage.getItem(ACTIVE_PROJECT_KEY) || state.activeProjectId;
+      
+      const mapped = data.map(p => mapSupabaseProjectToProject(p, currentActiveId));
+      
+      setState(prev => {
+        let nextActiveId = currentActiveId;
+        const activeExists = mapped.some(p => p.id === nextActiveId && !p.isArchived);
+        if (!activeExists) {
+          const firstActive = mapped.find(p => !p.isArchived);
+          nextActiveId = firstActive ? firstActive.id : (mapped[0]?.id || null);
+        }
+
+        if (nextActiveId) {
+          localStorage.setItem(ACTIVE_PROJECT_KEY, nextActiveId);
+        } else {
+          localStorage.removeItem(ACTIVE_PROJECT_KEY);
+        }
+
+        const updatedProjects = mapped.map(p => ({
+          ...p,
+          isActive: p.id === nextActiveId
+        }));
+
+        return {
+          ...prev,
+          projects: updatedProjects,
+          activeProjectId: nextActiveId
+        };
+      });
+    } catch (err) {
+      console.error('Gagal memuat data proyek dari Supabase:', err);
+    }
+  }, [state.activeProjectId]);
+
+  // Initial load and Realtime synchronization for public.projects
+  useEffect(() => {
+    loadProjects();
+
+    if (!isSupabaseConfigured) return;
+
+    const channel = supabase
+      .channel('public:projects')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'projects'
+        },
+        () => {
+          loadProjects();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadProjects]);
 
   // Save to local storage whenever state changes
   useEffect(() => {
@@ -129,6 +201,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const setActiveProject = (id: string) => {
+    localStorage.setItem(ACTIVE_PROJECT_KEY, id);
     setState(prev => ({
       ...prev,
       activeProjectId: id,
@@ -139,103 +212,158 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }));
   };
 
-  const addProject = (proj: Omit<Project, 'id' | 'isArchived' | 'isActive'>) => {
-    const newId = `PRJ-${Date.now().toString().slice(-4)}`;
-    const newProj: Project = {
-      ...proj,
-      id: newId,
-      isArchived: false,
-      isActive: true
-    };
+  const addProject = async (proj: Omit<Project, 'id' | 'isArchived' | 'isActive'>) => {
+    try {
+      const mandorId = localStorage.getItem('dataku_mandor_id') || undefined;
+      const created = await projectService.createProject({
+        name: proj.name,
+        owner_name: proj.owner,
+        location: proj.location,
+        start_date: proj.startDate,
+        target_date: proj.targetDate,
+        budget: proj.budget,
+        description: proj.notes || '',
+        status: 'active',
+        created_by: mandorId
+      });
 
-    setState(prev => {
-      const updatedProjects = prev.projects.map(p => ({ ...p, isActive: false })).concat(newProj);
-      
+      const newProj = mapSupabaseProjectToProject(created, created.id);
+      localStorage.setItem(ACTIVE_PROJECT_KEY, created.id);
+
       // Default initial materials for new project
       const initialNewMaterials: Material[] = [
-        { id: `MAT-${newId}-SEMEN`, projectId: newId, name: 'Semen Portland 50kg', category: 'Semen', stock: 0, unit: 'sak', minStock: 20 },
-        { id: `MAT-${newId}-BESI`, projectId: newId, name: 'Besi Beton Ulir 10mm', category: 'Besi', stock: 0, unit: 'batang', minStock: 30 },
-        { id: `MAT-${newId}-PASIR`, projectId: newId, name: 'Pasir Pasang Super', category: 'Pasir', stock: 0, unit: 'kol', minStock: 5 }
+        { id: `MAT-${created.id}-SEMEN`, projectId: created.id, name: 'Semen Portland 50kg', category: 'Semen', stock: 0, unit: 'sak', minStock: 20 },
+        { id: `MAT-${created.id}-BESI`, projectId: created.id, name: 'Besi Beton Ulir 10mm', category: 'Besi', stock: 0, unit: 'batang', minStock: 30 },
+        { id: `MAT-${created.id}-PASIR`, projectId: created.id, name: 'Pasir Pasang Super', category: 'Pasir', stock: 0, unit: 'kol', minStock: 5 }
       ];
 
-      return {
+      setState(prev => ({
         ...prev,
-        projects: updatedProjects,
-        activeProjectId: newId,
+        projects: [newProj, ...prev.projects.filter(p => p.id !== created.id).map(p => ({ ...p, isActive: false }))],
+        activeProjectId: created.id,
         materials: [...prev.materials, ...initialNewMaterials]
-      };
-    });
+      }));
+
+      triggerNotification(`Proyek "${created.name}" berhasil dibuat.`, 'INFO');
+      await loadProjects();
+    } catch (err: any) {
+      console.error('Gagal menambahkan proyek:', err);
+      triggerNotification(`Gagal membuat proyek: ${err?.message || 'Terjadi kesalahan sistem'}`, 'ALERT');
+      throw err;
+    }
   };
 
-  const archiveProject = (id: string) => {
-    setState(prev => {
-      const isArchivingActive = prev.activeProjectId === id;
-      const updatedProjects = prev.projects.map(p => 
-        p.id === id ? { ...p, isArchived: !p.isArchived, isActive: false } : p
-      );
-      
-      let nextActive = prev.activeProjectId;
-      if (isArchivingActive) {
-        const remaining = updatedProjects.filter(p => !p.isArchived);
-        nextActive = remaining.length > 0 ? remaining[0].id : null;
-        if (nextActive) {
-          updatedProjects.forEach(p => {
-            if (p.id === nextActive) p.isActive = true;
-          });
+  const archiveProject = async (id: string) => {
+    try {
+      const targetProj = state.projects.find(p => p.id === id);
+      const newStatus = targetProj?.isArchived ? 'active' : 'archived';
+
+      await projectService.setProjectStatus(id, newStatus);
+
+      setState(prev => {
+        const isArchivingActive = prev.activeProjectId === id;
+        const updatedProjects = prev.projects.map(p => 
+          p.id === id ? { ...p, isArchived: newStatus === 'archived', isActive: newStatus === 'active' && !isArchivingActive ? p.isActive : false } : p
+        );
+        
+        let nextActive = prev.activeProjectId;
+        if (isArchivingActive && newStatus === 'archived') {
+          const remaining = updatedProjects.filter(p => !p.isArchived);
+          nextActive = remaining.length > 0 ? remaining[0].id : null;
+          if (nextActive) {
+            localStorage.setItem(ACTIVE_PROJECT_KEY, nextActive);
+            updatedProjects.forEach(p => {
+              if (p.id === nextActive) p.isActive = true;
+            });
+          } else {
+            localStorage.removeItem(ACTIVE_PROJECT_KEY);
+          }
         }
-      }
 
-      return {
-        ...prev,
-        projects: updatedProjects,
-        activeProjectId: nextActive
-      };
-    });
+        return {
+          ...prev,
+          projects: updatedProjects,
+          activeProjectId: nextActive
+        };
+      });
+
+      triggerNotification(newStatus === 'archived' ? 'Proyek berhasil diarsipkan.' : 'Proyek berhasil diaktifkan kembali.', 'INFO');
+      await loadProjects();
+    } catch (err: any) {
+      console.error('Gagal mengubah status proyek:', err);
+      triggerNotification(`Gagal mengubah status proyek: ${err?.message || 'Terjadi kesalahan sistem'}`, 'ALERT');
+      throw err;
+    }
   };
 
-  const updateProject = (proj: Project) => {
-    setState(prev => ({
-      ...prev,
-      projects: prev.projects.map(p => p.id === proj.id ? proj : p)
-    }));
+  const updateProject = async (proj: Project) => {
+    try {
+      await projectService.updateProject(proj.id, {
+        name: proj.name,
+        owner_name: proj.owner,
+        location: proj.location,
+        start_date: proj.startDate,
+        target_date: proj.targetDate,
+        budget: proj.budget,
+        description: proj.notes,
+        status: proj.isArchived ? 'archived' : 'active'
+      });
+
+      setState(prev => ({
+        ...prev,
+        projects: prev.projects.map(p => p.id === proj.id ? proj : p)
+      }));
+
+      triggerNotification(`Proyek "${proj.name}" berhasil diperbarui.`, 'INFO');
+      await loadProjects();
+    } catch (err: any) {
+      console.error('Gagal memperbarui proyek:', err);
+      triggerNotification(`Gagal memperbarui proyek: ${err?.message || 'Terjadi kesalahan sistem'}`, 'ALERT');
+      throw err;
+    }
   };
 
-  const deleteProject = (id: string) => {
-    setState(prev => {
-      const updatedProjects = prev.projects.filter(p => p.id !== id);
-      const wasActive = prev.activeProjectId === id;
-      let nextActive = prev.activeProjectId;
-      if (wasActive) {
-        const remaining = updatedProjects.filter(p => !p.isArchived);
-        nextActive = remaining.length > 0 ? remaining[0].id : (updatedProjects.length > 0 ? updatedProjects[0].id : null);
-        updatedProjects.forEach(p => {
-          if (p.id === nextActive) p.isActive = true;
-        });
-      }
+  const deleteProject = async (id: string) => {
+    try {
+      await projectService.deleteProject(id);
 
-      return {
-        ...prev,
-        projects: updatedProjects,
-        activeProjectId: nextActive,
-        transactions: prev.transactions.filter(t => t.projectId !== id),
-        materials: prev.materials.filter(m => m.projectId !== id),
-        materialLogs: prev.materialLogs.filter(ml => ml.projectId !== id),
-        workers: prev.workers.filter(w => w.projectId !== id),
-        dailyReports: prev.dailyReports.filter(dr => dr.projectId !== id),
-        notifications: prev.notifications.filter(n => n.projectId !== id)
-      };
-    });
-
-    const tryDeleteSupabase = async () => {
-      if (isSupabaseConfigured) {
-        try {
-          await supabase.from('projects').delete().eq('id', id);
-        } catch (dbErr) {
-          console.error('Failed to cascade delete project from Supabase:', dbErr);
+      setState(prev => {
+        const updatedProjects = prev.projects.filter(p => p.id !== id);
+        const wasActive = prev.activeProjectId === id;
+        let nextActive = prev.activeProjectId;
+        if (wasActive) {
+          const remaining = updatedProjects.filter(p => !p.isArchived);
+          nextActive = remaining.length > 0 ? remaining[0].id : (updatedProjects.length > 0 ? updatedProjects[0].id : null);
+          if (nextActive) {
+            localStorage.setItem(ACTIVE_PROJECT_KEY, nextActive);
+            updatedProjects.forEach(p => {
+              if (p.id === nextActive) p.isActive = true;
+            });
+          } else {
+            localStorage.removeItem(ACTIVE_PROJECT_KEY);
+          }
         }
-      }
-    };
-    tryDeleteSupabase();
+
+        return {
+          ...prev,
+          projects: updatedProjects,
+          activeProjectId: nextActive,
+          transactions: prev.transactions.filter(t => t.projectId !== id),
+          materials: prev.materials.filter(m => m.projectId !== id),
+          materialLogs: prev.materialLogs.filter(ml => ml.projectId !== id),
+          workers: prev.workers.filter(w => w.projectId !== id),
+          dailyReports: prev.dailyReports.filter(dr => dr.projectId !== id),
+          notifications: prev.notifications.filter(n => n.projectId !== id)
+        };
+      });
+
+      triggerNotification('Proyek berhasil dihapus permanen.', 'INFO');
+      await loadProjects();
+    } catch (err: any) {
+      console.error('Gagal menghapus proyek:', err);
+      triggerNotification(`Gagal menghapus proyek: ${err?.message || 'Terjadi kesalahan sistem'}`, 'ALERT');
+      throw err;
+    }
   };
 
   // 1. ADD DANA MASUK
@@ -654,10 +782,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const clearAllState = () => {
     localStorage.removeItem(LOCAL_STORAGE_KEY);
+    localStorage.removeItem(ACTIVE_PROJECT_KEY);
     setState({
       currentUser: initialCurrentUser,
-      projects: initialProjects,
-      activeProjectId: 'PRJ-MDN-2024-08',
+      projects: [],
+      activeProjectId: null,
       transactions: initialTransactions,
       materials: initialMaterials,
       materialLogs: initialMaterialLogs,
@@ -665,6 +794,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dailyReports: initialDailyReports,
       notifications: initialNotifications
     });
+    loadProjects();
   };
 
   const updateWorker = (updatedWorker: Worker) => {

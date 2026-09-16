@@ -12,44 +12,7 @@ export const initialCurrentUser: User = {
   email: 'ucok.mandor@dataku.com'
 };
 
-export const initialProjects: Project[] = [
-  {
-    id: 'PRJ-MDN-2024-08',
-    name: 'Pembangunan Rumah Pak Budi',
-    owner: 'Bpk. Hendra Gunawan',
-    location: 'Rumah Tinggal (Medan)',
-    startDate: '2026-02-01',
-    targetDate: '2026-10-31',
-    budget: 150000000,
-    notes: 'Pembangunan rumah tinggal modern minimalis 2 lantai.',
-    isArchived: false,
-    isActive: true
-  },
-  {
-    id: 'PRJ-RENO-TOKO',
-    name: 'Renovasi Toko',
-    owner: 'Ibu Listia',
-    location: 'Kawasan Ruko Plaza',
-    startDate: '2026-05-10',
-    targetDate: '2026-08-30',
-    budget: 85000000,
-    notes: 'Renovasi interior, fasad depan, dan kelistrikan.',
-    isArchived: false,
-    isActive: false
-  },
-  {
-    id: 'PRJ-GUDANG',
-    name: 'Gudang Baru',
-    owner: 'PT Maju Bersama',
-    location: 'Kawasan Industri KIM',
-    startDate: '2025-06-01',
-    targetDate: '2025-12-15',
-    budget: 200000000,
-    notes: 'Pembangunan struktur baja gudang logistik.',
-    isArchived: true,
-    isActive: false
-  }
-];
+export const initialProjects: Project[] = [];
 
 export const initialMaterials: Material[] = [
   {

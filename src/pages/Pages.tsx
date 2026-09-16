@@ -2110,6 +2110,7 @@ export const ProjectListView: React.FC<ProjectListViewProps> = ({ onCreateProjec
   const [editBudget, setEditBudget] = useState(0);
   const [editStartDate, setEditStartDate] = useState('');
   const [editTargetDate, setEditTargetDate] = useState('');
+  const [editNotes, setEditNotes] = useState('');
 
   const handleOpenEdit = (p: Project) => {
     setProjectToEdit(p);
@@ -2119,6 +2120,7 @@ export const ProjectListView: React.FC<ProjectListViewProps> = ({ onCreateProjec
     setEditBudget(p.budget);
     setEditStartDate(p.startDate);
     setEditTargetDate(p.targetDate);
+    setEditNotes(p.notes || '');
     setShowEditModal(true);
   };
 
@@ -2133,7 +2135,8 @@ export const ProjectListView: React.FC<ProjectListViewProps> = ({ onCreateProjec
       owner: editOwner,
       budget: Number(editBudget),
       startDate: editStartDate,
-      targetDate: editTargetDate
+      targetDate: editTargetDate,
+      notes: editNotes
     });
 
     setShowEditModal(false);
@@ -2318,6 +2321,17 @@ export const ProjectListView: React.FC<ProjectListViewProps> = ({ onCreateProjec
                 className="w-full bg-white border-2 border-[#0F172A] rounded-xl px-3 py-2 text-xs font-bold text-[#0F172A] focus:outline-none"
               />
             </div>
+          </div>
+
+          <div>
+            <label className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wide block mb-1">Catatan / Deskripsi Proyek</label>
+            <textarea
+              rows={2}
+              value={editNotes}
+              onChange={(e) => setEditNotes(e.target.value)}
+              placeholder="Deskripsi singkat proyek..."
+              className="w-full bg-white border-2 border-[#0F172A] rounded-xl px-3 py-2 text-xs font-bold text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
           </div>
 
           <div className="flex gap-3 pt-4">
