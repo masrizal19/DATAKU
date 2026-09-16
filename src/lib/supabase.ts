@@ -1,42 +1,52 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const fallbackUrl = 'https://oiqassfyxzwrwlkzjgyz.supabase.co';
+const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
+const supabasePublishableKey = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || '').trim();
 
-const rawUrl =
-  import.meta.env.VITE_SUPABASE_URL ||
-  fallbackUrl;
+export const SUPABASE_URL = supabaseUrl;
+export const SUPABASE_PUBLISHABLE_KEY = supabasePublishableKey;
 
-const rawKey =
-  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-  import.meta.env.SUPABASE_PUBLISHABLE_KEY ||
-  '';
-
-export const SUPABASE_URL = (rawUrl || fallbackUrl).trim();
-export const SUPABASE_PUBLISHABLE_KEY = rawKey.replace(/['"]/g, '').trim();
-
-export const isSupabaseConfigured = Boolean(
-  SUPABASE_PUBLISHABLE_KEY &&
-  SUPABASE_PUBLISHABLE_KEY !== 'placeholder-publishable-key' &&
-  SUPABASE_PUBLISHABLE_KEY.length > 10
+export const hasSupabaseUrl = Boolean(
+  supabaseUrl &&
+  (supabaseUrl.startsWith('http://') || supabaseUrl.startsWith('https://')) &&
+  !supabaseUrl.includes('MASUKKAN_SUPABASE_URL')
 );
+
+export const hasSupabasePublishableKey = Boolean(
+  supabasePublishableKey &&
+  supabasePublishableKey !== 'placeholder-publishable-key' &&
+  supabasePublishableKey.length > 10 &&
+  !supabasePublishableKey.includes('MASUKKAN_SUPABASE_')
+);
+
+export const isSupabaseConfigured = hasSupabaseUrl && hasSupabasePublishableKey;
+
+// Safe runtime diagnostic: log presence without revealing secrets
+if (typeof window !== 'undefined') {
+  console.log('DATAKU Supabase Config Status:', {
+    hasSupabaseUrl,
+    hasSupabasePublishableKey
+  });
+}
 
 let client: SupabaseClient;
 
 try {
-  client = createClient(
-    SUPABASE_URL,
-    SUPABASE_PUBLISHABLE_KEY || 'placeholder-publishable-key',
-    {
+  if (isSupabaseConfigured) {
+    client = createClient(supabaseUrl, supabasePublishableKey, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
       },
-    }
-  );
+    });
+  } else {
+    client = createClient('https://placeholder.supabase.co', 'placeholder-publishable-key');
+  }
 } catch (initErr) {
   console.error('Supabase initialization warning:', initErr);
-  client = createClient(fallbackUrl, 'placeholder-publishable-key');
+  client = createClient('https://placeholder.supabase.co', 'placeholder-publishable-key');
 }
 
 export const supabase = client;
+
 

@@ -1,23 +1,26 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig} from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 
-export default defineConfig(() => {
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '');
+
   const supabaseUrl = (
     process.env.VITE_SUPABASE_URL ||
-    'https://oiqassfyxzwrwlkzjgyz.supabase.co'
+    env.VITE_SUPABASE_URL ||
+    ''
   ).trim();
 
   const supabaseKey = (
     process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-    process.env.SUPABASE_PUBLISHABLE_KEY ||
+    env.VITE_SUPABASE_PUBLISHABLE_KEY ||
     ''
   ).trim();
 
   // Custom domain production (https://dataku.mkverse.my.id) is served from root '/'.
   // Use VITE_BASE_PATH only if explicitly provided by user.
-  const base = process.env.VITE_BASE_PATH || '/';
+  const base = process.env.VITE_BASE_PATH || env.VITE_BASE_PATH || '/';
 
   return {
     base,
@@ -30,7 +33,6 @@ export default defineConfig(() => {
     define: {
       'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(supabaseUrl),
       'import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY': JSON.stringify(supabaseKey),
-      'import.meta.env.SUPABASE_PUBLISHABLE_KEY': JSON.stringify(supabaseKey),
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.

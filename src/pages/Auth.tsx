@@ -7,7 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Card, Button, Input, Toast } from '../components/Common';
 import { Sparkles } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { supabase, isSupabaseConfigured, hasSupabaseUrl, hasSupabasePublishableKey } from '../lib/supabase';
 
 interface AuthProps {
   onAuthSuccess: () => void;
@@ -65,68 +65,127 @@ export const AuthScreen: React.FC<AuthProps> = ({ onAuthSuccess }) => {
     }
 
     const tryLogin = async () => {
-      try {
-        // 1. Connection test before login
-        const { error: testError } = await supabase.rpc('dataku_connection_test');
-        if (testError) {
-          console.error('Connection test error:', testError);
-          const errMessage = testError.message || JSON.stringify(testError);
-          if (errMessage.toLowerCase().includes('invalid api key')) {
-            setError('Konfigurasi koneksi database bermasalah.');
-            return;
-          }
-        }
+      // 1. Validasi konfigurasi Supabase
+      if (!isSupabaseConfigured) {
+        console.warn('DATABASE_CONFIG_ERROR: Supabase credentials incomplete.', {
+          hasSupabaseUrl,
+          hasSupabasePublishableKey
+        });
+        setError('Konfigurasi koneksi database bermasalah.');
+        return;
+      }
 
-        // 2. Perform RPC login_mandor
+      try {
+        // 2. Eksekusi RPC login_mandor
         const { data, error: rpcError } = await supabase.rpc('login_mandor', {
           p_username: trimmedUsername,
           p_pin: trimmedPin
         });
 
         if (rpcError) {
-          console.error('RPC login_mandor error:', rpcError);
-          const errMessage = rpcError.message || JSON.stringify(rpcError);
-          if (errMessage.toLowerCase().includes('invalid api key')) {
+          console.error('RPC login_mandor error:', {
+            code: rpcError.code,
+            message: rpcError.message
+          });
+
+          const msg = (rpcError.message || '').toLowerCase();
+
+          // DATABASE_CONFIG_ERROR: Kunci API tidak valid atau tidak memiliki akses
+          if (
+            msg.includes('invalid api key') ||
+            msg.includes('api key not found') ||
+            msg.includes('jwt') ||
+            rpcError.code === '401' ||
+            rpcError.code === 'PGRST301'
+          ) {
             setError('Konfigurasi koneksi database bermasalah.');
             return;
           }
-          setError('Username atau PIN salah.');
+
+          // NETWORK_ERROR: Gagal terhubung ke server/jaringan
+          if (
+            msg.includes('failed to fetch') ||
+            msg.includes('network') ||
+            msg.includes('timeout')
+          ) {
+            setError('Gagal menghubungi server database. Periksa koneksi internet Anda.');
+            return;
+          }
+
+          // RPC_ERROR: Fungsi RPC tidak ada
+          if (rpcError.code === 'PGRST202') {
+            setError('Fungsi RPC login_mandor tidak ditemukan di database.');
+            return;
+          }
+
+          // Generic error lainnya
+          setError(`Gagal memproses login: ${rpcError.message || 'Kesalahan database'}`);
           return;
         }
 
-        // RPC returns true/success boolean or valid mandor object/list
-        const isSuccess = data && (data === true || (Array.isArray(data) && data.length > 0) || (typeof data === 'object' && Object.keys(data).length > 0));
+        // 3. Evaluasi hasil kembalian login_mandor
+        // Mendukung boolean true/false, object { success: true, ... }, atau array data mandor
+        let isSuccess = false;
+        let mandorId = 'demo-id';
+        let mandorName = trimmedUsername;
 
-        if (isSuccess) {
-          let mandorId = 'demo-id';
-          let mandorName = trimmedUsername;
-          if (Array.isArray(data) && data[0]) {
-            mandorId = data[0].id || mandorId;
-            mandorName = data[0].full_name || data[0].username || mandorName;
-          } else if (typeof data === 'object') {
+        if (data === true) {
+          isSuccess = true;
+        } else if (data && typeof data === 'object') {
+          if ('success' in data) {
+            if ((data as any).success === true) {
+              isSuccess = true;
+              if ((data as any).mandor) {
+                mandorId = (data as any).mandor.id || mandorId;
+                mandorName = (data as any).mandor.full_name || (data as any).mandor.username || mandorName;
+              }
+            } else {
+              isSuccess = false;
+            }
+          } else if (Array.isArray(data)) {
+            if (data.length > 0) {
+              isSuccess = true;
+              mandorId = data[0].id || mandorId;
+              mandorName = data[0].full_name || data[0].username || mandorName;
+            } else {
+              isSuccess = false;
+            }
+          } else if (Object.keys(data).length > 0) {
+            isSuccess = true;
             mandorId = (data as any).id || mandorId;
             mandorName = (data as any).full_name || (data as any).username || mandorName;
           }
+        }
 
+        if (isSuccess) {
           setSuccessToast(`Login berhasil. Selamat datang, ${mandorName}!`);
-          
+
           localStorage.setItem('dataku_auth', 'true');
           localStorage.setItem('dataku_user', trimmedUsername);
           localStorage.setItem('dataku_mandor_id', mandorId);
-          
+
           loginUser(trimmedUsername);
-          
+
           setTimeout(() => {
             onAuthSuccess();
-          }, 1000);
+          }, 800);
         } else {
+          // INVALID_LOGIN: Username atau PIN tidak cocok
           setError('Username atau PIN salah.');
         }
       } catch (err: any) {
         console.error('Login exception:', err);
-        const errMsg = err?.message || String(err);
-        if (errMsg.toLowerCase().includes('invalid api key')) {
+        const errMsg = (err?.message || String(err)).toLowerCase();
+        if (
+          errMsg.includes('invalid api key') ||
+          errMsg.includes('api key')
+        ) {
           setError('Konfigurasi koneksi database bermasalah.');
+        } else if (
+          errMsg.includes('failed to fetch') ||
+          errMsg.includes('network')
+        ) {
+          setError('Gagal menghubungi server database. Periksa koneksi internet Anda.');
         } else {
           setError('Username atau PIN salah.');
         }
