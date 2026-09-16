@@ -51,6 +51,7 @@ interface AppContextType {
   clearAllState: () => void;
   updateWorker: (worker: Worker) => Promise<void> | void;
   deleteWorker: (id: string) => Promise<void> | void;
+  deleteMasterWorker: (id: string) => Promise<void>;
   updateMaterial: (mat: Material) => void;
   deleteMaterial: (id: string) => void;
   updateCurrentUser: (user: User) => void;
@@ -1022,6 +1023,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const deleteMasterWorker = async (id: string) => {
+    try {
+      if (isSupabaseConfigured) {
+        await workerService.deleteMasterWorker(id);
+        await loadWorkers();
+      } else {
+        setMasterWorkers(prev => prev.filter(mw => mw.id !== id));
+      }
+      triggerNotification('Data master tukang berhasil dihapus.', 'INFO');
+    } catch (err: any) {
+      console.error('Failed to delete master worker:', err);
+      triggerNotification(err.message || 'Gagal menghapus data master tukang.', 'WARNING');
+      throw err;
+    }
+  };
+
   const updateMaterial = (updatedMat: Material) => {
     setState(prev => ({
       ...prev,
@@ -1099,6 +1116,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         clearAllState,
         updateWorker,
         deleteWorker,
+        deleteMasterWorker,
         updateMaterial,
         deleteMaterial,
         updateCurrentUser,

@@ -162,15 +162,51 @@ export const workerService = {
   },
 
   async deleteMasterWorker(id: string): Promise<void> {
-    if (!isSupabaseConfigured) return;
+    if (!isSupabaseConfigured) {
+      throw new Error('Supabase database tidak terkonfigurasi.');
+    }
+    if (!id) {
+      throw new Error('ID worker tidak valid.');
+    }
+
+    // 1. Check if worker has history in dataku_week_workers or dataku_worker_payments
+    const [{ count: weekCount, error: weekErr }, { count: payCount, error: payErr }] = await Promise.all([
+      supabase
+        .from('dataku_week_workers')
+        .select('id', { count: 'exact', head: true })
+        .eq('worker_id', String(id)),
+      supabase
+        .from('dataku_worker_payments')
+        .select('id', { count: 'exact', head: true })
+        .eq('worker_id', String(id))
+    ]);
+
+    if (weekErr) {
+      console.error('Error checking dataku_week_workers:', weekErr);
+    }
+    if (payErr) {
+      console.error('Error checking dataku_worker_payments:', payErr);
+    }
+
+    const hasWeekHistory = typeof weekCount === 'number' && weekCount > 0;
+    const hasPayHistory = typeof payCount === 'number' && payCount > 0;
+
+    if (hasWeekHistory || hasPayHistory) {
+      throw new Error('Tukang ini masih memiliki riwayat penugasan atau pembayaran sehingga tidak dapat dihapus permanen.');
+    }
+
+    // 2. Perform DELETE on public.dataku_workers using worker.id
     const { error } = await supabase
       .from('dataku_workers')
       .delete()
-      .eq('id', id);
+      .eq('id', String(id));
 
     if (error) {
       console.error('Error deleting dataku_worker:', error);
-      throw error;
+      if (error.code === '23503' || error.message?.includes('foreign key constraint') || error.message?.includes('violates foreign key')) {
+        throw new Error('Tukang ini masih memiliki riwayat penugasan atau pembayaran sehingga tidak dapat dihapus permanen.');
+      }
+      throw new Error(error.message || 'Gagal menghapus data tukang.');
     }
   },
 
