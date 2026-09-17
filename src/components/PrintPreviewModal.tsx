@@ -37,6 +37,70 @@ interface PrintPreviewModalProps {
   documentType?: 'rekapKeuangan' | 'rekapUpah' | 'laporanProyek' | 'slipGaji';
 }
 
+const colorCache = new Map<string, string>();
+
+const getRgbaColor = (cssColor: string): string => {
+  if (!cssColor || cssColor === 'transparent' || cssColor === 'none') return cssColor;
+  if (cssColor.startsWith('rgb') || cssColor.startsWith('#')) return cssColor;
+  if (colorCache.has(cssColor)) return colorCache.get(cssColor)!;
+
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return cssColor;
+    ctx.fillStyle = cssColor;
+    ctx.fillRect(0, 0, 1, 1);
+    const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+    const rgbaStr = `rgba(${r}, ${g}, ${b}, ${a / 255})`;
+    colorCache.set(cssColor, rgbaStr);
+    return rgbaStr;
+  } catch (e) {
+    return cssColor;
+  }
+};
+
+const normalizeColorsOnClone = (originalNode: HTMLElement, cloneNode: HTMLElement) => {
+  const colorProps = [
+    'color',
+    'backgroundColor',
+    'borderTopColor',
+    'borderRightColor',
+    'borderBottomColor',
+    'borderLeftColor',
+    'outlineColor',
+    'textDecorationColor',
+    'fill',
+    'stroke'
+  ];
+
+  const originalElements = [originalNode, ...Array.from(originalNode.querySelectorAll<HTMLElement>('*'))];
+  const cloneElements = [cloneNode, ...Array.from(cloneNode.querySelectorAll<HTMLElement>('*'))];
+
+  for (let i = 0; i < originalElements.length; i++) {
+    const orig = originalElements[i];
+    const clone = cloneElements[i];
+    const compStyle = window.getComputedStyle(orig);
+
+    colorProps.forEach((prop) => {
+      const val = compStyle[prop as any];
+      if (val && (val.includes('oklab') || val.includes('color-mix') || val.includes('lab') || val.includes('lch'))) {
+        (clone.style as any)[prop] = getRgbaColor(val);
+      }
+    });
+
+    const boxShadow = compStyle.boxShadow;
+    if (boxShadow && (boxShadow.includes('oklab') || boxShadow.includes('color-mix') || boxShadow.includes('lab') || boxShadow.includes('lch'))) {
+       clone.style.boxShadow = 'none';
+    }
+    const bgImage = compStyle.backgroundImage;
+    if (bgImage && (bgImage.includes('oklab') || bgImage.includes('color-mix') || bgImage.includes('lab') || bgImage.includes('lch'))) {
+       clone.style.backgroundImage = 'none';
+    }
+  }
+};
+
 export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
   reportData,
   onClose,
@@ -275,14 +339,36 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
         const pageNum = i + 1;
         setExportProgressText(`Merender Halaman ${pageNum} dari ${pageElements.length}...`);
 
-        // High Quality Render with html2canvas
-        const canvas = await html2canvas(pageEl, {
+        // High Quality Render with html2canvas (with CSS sanitization fallback)
+        const exportClone = pageEl.cloneNode(true) as HTMLElement;
+        exportClone.style.position = 'absolute';
+        exportClone.style.left = '-9999px';
+        exportClone.style.top = '0';
+        pageEl.parentNode?.insertBefore(exportClone, pageEl.nextSibling);
+
+        normalizeColorsOnClone(pageEl, exportClone);
+
+        const canvas = await html2canvas(exportClone, {
           scale: 2,
           useCORS: true,
           allowTaint: false,
           backgroundColor: '#ffffff',
-          logging: false
+          logging: false,
+          onclone: (clonedDoc) => {
+            const styleTags = clonedDoc.querySelectorAll('style');
+            styleTags.forEach(tag => {
+              if (tag.textContent) {
+                tag.textContent = tag.textContent
+                  .replace(/oklab/g, 'rgba')
+                  .replace(/color-mix/g, 'rgba')
+                  .replace(/lab\(/g, 'rgba(')
+                  .replace(/lch\(/g, 'rgba(');
+              }
+            });
+          }
         });
+
+        exportClone.remove();
 
         const blob = await new Promise<Blob>((resolve, reject) => {
           canvas.toBlob((b) => {
