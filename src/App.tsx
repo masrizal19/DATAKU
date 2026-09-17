@@ -342,16 +342,7 @@ const MainAppContent: React.FC = () => {
         </main>
       </div>
 
-      {/* Floating Action Button (FAB) for Mobile Quick Actions */}
-      <div className="lg:hidden fixed bottom-24 right-6 z-40 select-none">
-        <button
-          onClick={() => setActiveSheet('aktivitas_cepat')}
-          className="w-14 h-14 rounded-full bg-[#FAF8FF] border-3 border-[#0F172A] flex items-center justify-center font-extrabold text-[#0F172A] shadow-neo cursor-pointer transition-all active:scale-95 hover:bg-white"
-          aria-label="Aktivitas Cepat"
-        >
-          <Plus className="w-8 h-8" />
-        </button>
-      </div>
+
 
       {/* Mobile Bottom Navigation */}
       <MobileBottomNav

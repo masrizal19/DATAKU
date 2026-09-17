@@ -196,3 +196,78 @@ export interface AppState {
   dailyReports: DailyReport[];
   notifications: Notification[];
 }
+
+export type PaperSize = 'A4' | 'F4';
+export type PageOrientation = 'Portrait' | 'Landscape' | 'Otomatis';
+export type ImageExportFormat = 'JPEG' | 'PNG';
+
+export interface DocumentPrintConfig {
+  paperSize: PaperSize;
+  orientation: PageOrientation;
+  autoFitContent: boolean;
+  imageFormat: ImageExportFormat;
+  includeLogo: boolean;
+  includeKop: boolean;
+  includeSignature: boolean;
+}
+
+export interface GlobalPrintSettings {
+  defaultPaperSize: PaperSize;
+  defaultOrientation: PageOrientation;
+  autoFitContent: boolean;
+  defaultImageFormat: ImageExportFormat;
+  perDocumentSettings: {
+    rekapKeuangan: DocumentPrintConfig;
+    rekapUpah: DocumentPrintConfig;
+    laporanProyek: DocumentPrintConfig;
+    slipGaji: DocumentPrintConfig;
+  };
+}
+
+export interface NavigationConfig {
+  activeOutlineEnabled: boolean; // default: true
+  activeOutlineWidth: number; // 0 - 6 px, default: 2
+  activeOutlineColor: string; // hex, default: '#0F172A'
+  activeBackgroundColor: string; // hex, default: '#E0F2FE'
+  activeTextColor: string; // hex, default: '#0F172A'
+  activeRadius: number; // 0 - 30 px, default: 12
+  activePaddingX: number; // 4 - 32 px, default: 16
+  activePaddingY: number; // 4 - 24 px, default: 10
+  iconTextGap: number; // 0 - 30 px, default: 12
+  iconSize: number; // 14 - 32 px, default: 18
+  iconOffsetY: number; // -5 to +5 px, default: 0
+  textSize: number; // 12 - 20 px, default: 14
+  textWeight: 'regular' | 'medium' | 'semibold' | 'bold'; // default: 'bold'
+  menuGap: number; // 0 - 30 px, default: 6
+  hoverBackgroundColor: string; // hex, default: '#F8FAFC'
+  hoverTextColor: string; // hex, default: '#0F172A'
+  hoverOutlineEnabled: boolean; // default: false
+  hoverOutlineWidth: number; // 0 - 4 px, default: 1
+}
+
+export interface AppIdentityConfig {
+  appName: string;
+  tagline: string;
+  logoUrl: string;
+  logoScale: number; // percentage (25% - 300%)
+  logoX: number; // px horizontal offset (-50 to 50)
+  logoY: number; // px vertical offset (-50 to 50)
+  logoNameGap: number; // px gap between logo and name (0 - 40)
+  appNameSize: number; // px font size (12 - 40)
+  appNameX: number; // px offset (-50 to 50)
+  appNameY: number; // px offset (-50 to 50)
+  taglineSize: number; // px font size (8 - 24)
+  taglineGap: number; // px gap between name and tagline (0 - 20)
+  appNameColor: string; // hex
+  taglineColor: string; // hex
+  taglineBgColor: string; // hex
+  // OUTLINE / BINGKAI LOGO
+  logoOutlineEnabled?: boolean; // default true
+  logoOutlineWidth?: number; // 0 - 10 px, default 2
+  logoOutlineColor?: string; // hex, default '#0F172A'
+  logoOutlineRadius?: number; // 0 - 50 px, default 12
+  logoOutlinePadding?: number; // 0 - 30 px, default 4
+  // PENGATURAN NAVIGATION & ACTIVE MENU
+  navigationSettings?: NavigationConfig;
+}
+

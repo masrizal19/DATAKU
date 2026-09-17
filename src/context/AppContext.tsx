@@ -18,7 +18,8 @@ import { reportService, mapSupabaseDailyReportToApp } from '../services/reportSe
 import { fundService } from '../services/fundService';
 import { getMandorUuid } from '../services/userService';
 import { isUuidFormat } from '../utils/uuid';
-import { AppState, User, Project, Transaction, Material, MaterialLog, Worker, MasterWorker, DailyReport, Notification, MaterialCategory } from '../types';
+import { AppState, User, Project, Transaction, Material, MaterialLog, Worker, MasterWorker, DailyReport, Notification, MaterialCategory, AppIdentityConfig } from '../types';
+import { identityService, DEFAULT_IDENTITY_CONFIG } from '../services/identityService';
 import {
   initialCurrentUser,
   initialNotifications
@@ -26,6 +27,10 @@ import {
 
 interface AppContextType {
   state: AppState;
+  identityConfig: AppIdentityConfig;
+  updateIdentityConfig: (cfg: Partial<AppIdentityConfig>) => void;
+  resetIdentityConfig: () => void;
+  saveIdentityConfig: (cfg?: AppIdentityConfig) => void;
   masterWorkers: MasterWorker[];
   loadWorkers: () => Promise<void>;
   loginUser: (emailOrPhone: string, mandorIdFromAuth?: string) => void;
@@ -68,6 +73,34 @@ const ACTIVE_PROJECT_KEY = 'dataku_active_project_id';
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [masterWorkers, setMasterWorkers] = useState<MasterWorker[]>([]);
+  const [identityConfig, setIdentityConfig] = useState<AppIdentityConfig>(() => {
+    return identityService.loadConfig();
+  });
+
+  const updateIdentityConfig = useCallback((cfg: Partial<AppIdentityConfig>) => {
+    setIdentityConfig(prev => {
+      const next = { ...prev, ...cfg };
+      identityService.saveConfig(next);
+      return next;
+    });
+  }, []);
+
+  const resetIdentityConfig = useCallback(() => {
+    const defaultCfg = identityService.resetConfig();
+    setIdentityConfig(defaultCfg);
+  }, []);
+
+  const saveIdentityConfig = useCallback((cfg?: AppIdentityConfig) => {
+    if (cfg) {
+      setIdentityConfig(cfg);
+      identityService.saveConfig(cfg);
+    } else {
+      setIdentityConfig(prev => {
+        identityService.saveConfig(prev);
+        return prev;
+      });
+    }
+  }, []);
 
   const [state, setState] = useState<AppState>(() => {
     const isAuthenticated = localStorage.getItem("dataku_auth") === "true";
@@ -1356,6 +1389,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     <AppContext.Provider
       value={{
         state,
+        identityConfig,
+        updateIdentityConfig,
+        resetIdentityConfig,
+        saveIdentityConfig,
         masterWorkers,
         loadWorkers,
         loginUser,

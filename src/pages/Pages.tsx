@@ -32,13 +32,20 @@ import {
   FileSpreadsheet,
   FileDown,
   Printer,
-  GripVertical
+  GripVertical,
+  Sliders,
+  Image as ImageIcon,
+  Loader2,
+  Check
 } from 'lucide-react';
-import { Transaction, Material, MaterialLog, Worker, DailyReport, Project, MaterialCategory, MasterWorker } from '../types';
+import { Transaction, Material, MaterialLog, Worker, DailyReport, Project, MaterialCategory, MasterWorker, PaperSize, PageOrientation, ImageExportFormat, GlobalPrintSettings } from '../types';
 import { buildCurrentReportData, exportReportToExcel, exportReportToCSV } from '../utils/rekapEngine';
 import { PrintPreviewModal } from '../components/PrintPreviewModal';
 import { documentService } from '../services/documentService';
 import { getMandorUuid, isUuidFormat } from '../services/userService';
+import { printSettingsService, DEFAULT_PRINT_SETTINGS } from '../services/printSettingsService';
+import html2canvas from 'html2canvas';
+import JSZip from 'jszip';
 import {
   loadGoogleSheetsConnection,
   connectGoogleSheets,
@@ -47,6 +54,8 @@ import {
   GoogleSheetsConnection
 } from '../services/googleSheetsService';
 import { getCurrentProjectWeek, getProjectWeeks } from '../utils/datetime';
+import { IdentitySettingsSection } from '../components/IdentitySettingsSection';
+import { AppBrand } from '../components/AppBrand';
 
 /// --- VIEW 1: DASHBOARD VIEW ---
 interface DashboardViewProps {
@@ -1400,7 +1409,7 @@ interface WorkersViewProps {
 }
 
 export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPayWorkerClick }) => {
-  const { state, updateWorker, deleteWorker, addWorker, masterWorkers } = useApp();
+  const { state, updateWorker, deleteWorker, addWorker, masterWorkers, identityConfig } = useApp();
   const activeProj = state.projects.find(p => p.id === state.activeProjectId);
 
   // States for Payroll / Receipt Modal Details
@@ -1415,6 +1424,14 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
   
   // Custom dropdown menu state for individual cards
   const [activeMenuWorkerId, setActiveMenuWorkerId] = useState<string | null>(null);
+
+  // Worker Slip Print & Export States
+  const [slipPaperSize, setSlipPaperSize] = useState<PaperSize>('A4');
+  const [slipOrientation, setSlipOrientation] = useState<PageOrientation>('Portrait');
+  const [slipImageFormat, setSlipImageFormat] = useState<ImageExportFormat>('JPEG');
+  const [isExportingSlipImage, setIsExportingSlipImage] = useState<boolean>(false);
+  const [slipExportProgress, setSlipExportProgress] = useState<string>('');
+  const [showSlipFormatBar, setShowSlipFormatBar] = useState<boolean>(false);
 
   if (!activeProj) {
     return <div className="text-center py-8">Pilih proyek aktif terlebih dahulu.</div>;
@@ -2138,27 +2155,187 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
         </div>
       )}
 
-      {/* 4. PRINT PREVIEW BUKTI PEMBAYARAN WORKER (A4 Slip) */}
+      {/* 4. PRINT PREVIEW BUKTI PEMBAYARAN WORKER (A4 / F4 Slip) */}
       {(printSingleWorker || printAllWorkers) && (
-        <div className="fixed inset-0 bg-[#0F172A]/80 flex items-center justify-center z-50 p-4 select-none animate-fade-in overflow-y-auto">
-          <div className="bg-white border-3 border-[#0F172A] rounded-2xl w-full max-w-3xl shadow-neo-lg overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="bg-[#FAF8FF] border-b-2 border-[#0F172A] p-4 flex justify-between items-center">
-              <h3 className="font-chunky text-base text-[#0F172A] uppercase">
-                {printAllWorkers ? 'PREVIEW CETAK SEMUA BUKTI UPAH' : `PREVIEW CETAK BUKTI UPAH: ${printSingleWorker?.name}`}
-              </h3>
-              <div className="flex gap-2">
+        <div className="fixed inset-0 bg-[#0F172A]/80 flex items-center justify-center z-50 p-2 sm:p-4 select-none animate-fade-in overflow-y-auto print:p-0 print:bg-white print:static print:overflow-visible">
+          <div className="bg-white border-3 border-[#0F172A] rounded-2xl w-full max-w-4xl shadow-neo-lg overflow-hidden flex flex-col max-h-[92vh] print:max-h-none print:border-none print:shadow-none print:w-full print:rounded-none">
+            <div className="bg-[#FAF8FF] border-b-2 border-[#0F172A] p-3 sm:p-4 flex flex-wrap justify-between items-center gap-2 print:hidden">
+              <div className="flex items-center gap-2">
+                <h3 className="font-chunky text-xs sm:text-sm text-[#0F172A] uppercase">
+                  {printAllWorkers ? 'PREVIEW CETAK SEMUA BUKTI UPAH' : `PREVIEW CETAK BUKTI UPAH: ${printSingleWorker?.name}`}
+                </h3>
+                <span className="text-[10px] font-extrabold bg-white border border-[#0F172A] px-2 py-0.5 rounded shadow-neo-sm">
+                  {slipPaperSize} • {slipOrientation}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Format Settings Toggle */}
+                <button
+                  onClick={() => setShowSlipFormatBar(!showSlipFormatBar)}
+                  className={`px-2.5 py-1.5 font-bold text-xs rounded-xl border-2 border-[#0F172A] shadow-neo-sm flex items-center gap-1 cursor-pointer transition-all ${
+                    showSlipFormatBar ? 'bg-amber-300 text-slate-950' : 'bg-white hover:bg-slate-100 text-slate-800'
+                  }`}
+                >
+                  <Sliders className="w-3.5 h-3.5" />
+                  <span>Format</span>
+                </button>
+
+                {/* Print PDF Button */}
                 <Button variant="secondary" size="sm" onClick={triggerPrintReceipt}>
-                  <Printer className="w-4 h-4 mr-1.5" /> Cetak (A4)
+                  <Printer className="w-4 h-4 mr-1.5" /> Cetak / Save PDF
                 </Button>
+
+                {/* Export JPEG / PNG */}
+                <button
+                  onClick={async () => {
+                    const printableArea = document.getElementById('printable-area');
+                    if (!printableArea) return;
+                    setIsExportingSlipImage(true);
+                    setSlipExportProgress('Menyiapkan gambar slip...');
+                    try {
+                      const pageElements = Array.from(printableArea.querySelectorAll<HTMLElement>('.page-break-container'));
+                      const ext = slipImageFormat === 'PNG' ? 'png' : 'jpg';
+                      const mime = slipImageFormat === 'PNG' ? 'image/png' : 'image/jpeg';
+                      const cleanProject = activeProj.name.replace(/[^a-zA-Z0-9]/g, '_');
+                      
+                      const images: { name: string; blob: Blob; dataUrl: string }[] = [];
+                      for (let i = 0; i < pageElements.length; i++) {
+                        const el = pageElements[i];
+                        setSlipExportProgress(`Merender slip ${i + 1} dari ${pageElements.length}...`);
+                        const canvas = await html2canvas(el, {
+                          scale: 2.2,
+                          useCORS: true,
+                          backgroundColor: '#ffffff'
+                        });
+                        const dataUrl = canvas.toDataURL(mime, 0.95);
+                        const blob = await (await fetch(dataUrl)).blob();
+                        images.push({
+                          name: `DATAKU_${cleanProject}_SlipUpah_${String(i + 1).padStart(2, '0')}.${ext}`,
+                          blob,
+                          dataUrl
+                        });
+                      }
+
+                      if (images.length === 1) {
+                        const item = images[0];
+                        const a = document.createElement('a');
+                        a.href = item.dataUrl;
+                        a.download = item.name;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                      } else if (images.length > 1) {
+                        setSlipExportProgress('Mengemas ke file ZIP...');
+                        const zip = new JSZip();
+                        images.forEach(img => zip.file(img.name, img.blob));
+                        const zipBlob = await zip.generateAsync({ type: 'blob' });
+                        const zipUrl = URL.createObjectURL(zipBlob);
+                        const a = document.createElement('a');
+                        a.href = zipUrl;
+                        a.download = `DATAKU_${cleanProject}_Semua_SlipUpah.zip`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(zipUrl);
+                      }
+                    } catch (err) {
+                      console.error('Error exporting slip image:', err);
+                      alert('Gagal mengekspor gambar slip gaji.');
+                    } finally {
+                      setIsExportingSlipImage(false);
+                      setSlipExportProgress('');
+                    }
+                  }}
+                  disabled={isExportingSlipImage}
+                  className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white font-extrabold text-xs rounded-xl border-2 border-[#0F172A] shadow-neo-sm flex items-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
+                >
+                  {isExportingSlipImage ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" /> {slipExportProgress || 'Export...'}
+                    </>
+                  ) : (
+                    <>
+                      <ImageIcon className="w-4 h-4" /> Export {slipImageFormat}
+                    </>
+                  )}
+                </button>
+
                 <Button variant="ghost" size="sm" onClick={() => { setPrintSingleWorker(null); setPrintAllWorkers(false); }}>
                   Tutup
                 </Button>
               </div>
             </div>
 
+            {/* Quick Slip Format Drawer */}
+            {showSlipFormatBar && (
+              <div className="bg-amber-50 border-b-2 border-[#0F172A] p-3 text-xs font-bold text-slate-900 grid grid-cols-1 sm:grid-cols-3 gap-3 print:hidden">
+                <div>
+                  <label className="text-[10px] uppercase font-extrabold text-slate-500 block mb-1">Ukuran Kertas:</label>
+                  <div className="flex gap-1.5">
+                    {(['A4', 'F4'] as PaperSize[]).map((sz) => (
+                      <button
+                        key={sz}
+                        type="button"
+                        onClick={() => setSlipPaperSize(sz)}
+                        className={`flex-1 py-1 px-2 rounded-lg border-2 text-xs font-extrabold cursor-pointer ${
+                          slipPaperSize === sz ? 'bg-[#0284C7] text-white border-[#0F172A]' : 'bg-white text-slate-700 border-slate-300'
+                        }`}
+                      >
+                        {sz}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] uppercase font-extrabold text-slate-500 block mb-1">Orientasi:</label>
+                  <div className="flex gap-1.5">
+                    {(['Portrait', 'Landscape'] as PageOrientation[]).map((ori) => (
+                      <button
+                        key={ori}
+                        type="button"
+                        onClick={() => setSlipOrientation(ori)}
+                        className={`flex-1 py-1 px-2 rounded-lg border-2 text-xs font-extrabold cursor-pointer ${
+                          slipOrientation === ori ? 'bg-[#0284C7] text-white border-[#0F172A]' : 'bg-white text-slate-700 border-slate-300'
+                        }`}
+                      >
+                        {ori}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] uppercase font-extrabold text-slate-500 block mb-1">Format Gambar:</label>
+                  <div className="flex gap-1.5">
+                    {(['JPEG', 'PNG'] as ImageExportFormat[]).map((fmt) => (
+                      <button
+                        key={fmt}
+                        type="button"
+                        onClick={() => setSlipImageFormat(fmt)}
+                        className={`flex-1 py-1 px-2 rounded-lg border-2 text-xs font-extrabold cursor-pointer ${
+                          slipImageFormat === fmt ? 'bg-purple-600 text-white border-[#0F172A]' : 'bg-white text-slate-700 border-slate-300'
+                        }`}
+                      >
+                        {fmt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Document display area */}
-            <div className="flex-1 overflow-y-auto p-6 md:p-10 bg-slate-100 flex justify-center">
-              <div id="printable-area" className="w-full max-w-[210mm] space-y-8 select-text">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-8 bg-slate-100 flex justify-center print:p-0 print:bg-white print:overflow-visible">
+              <div
+                id="printable-area"
+                className={`w-full space-y-8 select-text ${
+                  slipPaperSize === 'A4'
+                    ? slipOrientation === 'Portrait' ? 'max-w-[210mm]' : 'max-w-[297mm]'
+                    : slipOrientation === 'Portrait' ? 'max-w-[215mm]' : 'max-w-[330mm]'
+                }`}
+              >
                 
                 {/* Resolve which workers are rendered */}
                 {(printAllWorkers ? projWorkers : [printSingleWorker]).map((w, idx) => {
@@ -2172,9 +2349,33 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
                     >
                       {/* Logo / Header banner */}
                       <div className="flex justify-between items-center border-b-2 border-black pb-4 mb-4 select-none">
-                        <div>
-                          <h1 className="text-xl font-black tracking-tight">DATAKU</h1>
-                          <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">SISTEM KEUANGAN MANDOR LAPANGAN</p>
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="flex-shrink-0 flex items-center justify-center"
+                            style={{
+                              width: '48px',
+                              height: '48px',
+                              borderWidth: identityConfig?.logoOutlineEnabled !== false ? `${identityConfig?.logoOutlineWidth ?? 2}px` : '0px',
+                              borderStyle: identityConfig?.logoOutlineEnabled !== false && (identityConfig?.logoOutlineWidth ?? 2) > 0 ? 'solid' : 'none',
+                              borderColor: identityConfig?.logoOutlineEnabled !== false ? (identityConfig?.logoOutlineColor || '#0F172A') : 'transparent',
+                              borderRadius: identityConfig?.logoOutlineEnabled !== false ? `${identityConfig?.logoOutlineRadius ?? 12}px` : '0px',
+                              padding: identityConfig?.logoOutlineEnabled !== false ? `${identityConfig?.logoOutlinePadding ?? 4}px` : '0px',
+                              backgroundColor: identityConfig?.logoOutlineEnabled !== false ? '#FFFFFF' : 'transparent',
+                            }}
+                          >
+                            <img
+                              src={identityConfig?.logoUrl || '/LOGO.png'}
+                              alt={identityConfig?.appName || 'DATAKU'}
+                              className="w-full h-full object-contain"
+                              crossOrigin="anonymous"
+                              referrerPolicy="no-referrer"
+                            />
+                          </div>
+                          <div>
+                            <h1 className="text-xl font-black tracking-tight leading-none">{identityConfig?.appName || 'DATAKU'}</h1>
+                            <p className="text-[9px] font-bold text-slate-600 uppercase tracking-wider mt-0.5">{identityConfig?.tagline || 'SISTEM MANDOR'}</p>
+                            <p className="text-[8px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">SISTEM KEUANGAN MANDOR</p>
+                          </div>
                         </div>
                         <div className="text-right">
                           <span className="text-xs font-extrabold uppercase bg-black text-white px-2.5 py-1 rounded">
@@ -2278,6 +2479,13 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
               </div>
             </div>
           </div>
+
+          <style>{`
+            @page {
+              size: ${slipPaperSize === 'A4' ? 'A4 portrait' : '215mm 330mm portrait'};
+              margin: 10mm;
+            }
+          `}</style>
         </div>
       )}
 
@@ -2966,6 +3174,31 @@ export const SettingsView: React.FC = () => {
   const [notifBalance, setNotifBalance] = useState(true);
   const [notifMaterial, setNotifMaterial] = useState(true);
 
+  // Global Print & Export Settings States
+  const [printSettings, setPrintSettings] = useState<GlobalPrintSettings>(() => printSettingsService.loadSettings());
+  const [isSavingPrintSettings, setIsSavingPrintSettings] = useState(false);
+  const [printSettingsSaved, setPrintSettingsSaved] = useState(false);
+
+  // Load print settings from Supabase on mount
+  React.useEffect(() => {
+    printSettingsService.fetchRemoteSettings().then((settings) => {
+      setPrintSettings(settings);
+    });
+  }, []);
+
+  const handleSavePrintSettings = async () => {
+    setIsSavingPrintSettings(true);
+    try {
+      await printSettingsService.saveSettings(printSettings);
+      setPrintSettingsSaved(true);
+      setTimeout(() => setPrintSettingsSaved(false), 3000);
+    } catch (err) {
+      console.error('Error saving print settings:', err);
+    } finally {
+      setIsSavingPrintSettings(false);
+    }
+  };
+
   // File restore helper reference
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -3340,6 +3573,9 @@ export const SettingsView: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* 0. PENGATURAN IDENTITAS APLIKASI & LOGO (FRONTEND ONLY) */}
+      <IdentitySettingsSection />
+
       {/* 1. EDIT PROFIL MANDOR & FOTO */}
       <Card className="p-5 select-none">
         <span className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wider block mb-3">
@@ -3586,6 +3822,190 @@ export const SettingsView: React.FC = () => {
           </div>
         </div>
       </Card>
+
+      {/* 4. PENGATURAN DOKUMEN & FORMAT CETAK */}
+      <Card className="p-5 select-none bg-[#FAF8FF]">
+        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 border-b border-[#0F172A]/10 pb-3 mb-4">
+          <div>
+            <span className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wider block">
+              🖨️ PENGATURAN DOKUMEN & FORMAT CETAK
+            </span>
+            <h4 className="text-sm font-chunky text-[#0F172A] uppercase mt-0.5">
+              Standar Ukuran Kertas & Export Gambar
+            </h4>
+          </div>
+          <button
+            onClick={handleSavePrintSettings}
+            disabled={isSavingPrintSettings}
+            className="px-3.5 py-2 bg-[#0284C7] hover:bg-[#0369A1] text-white font-extrabold text-xs rounded-xl border-2 border-[#0F172A] shadow-neo-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
+          >
+            {isSavingPrintSettings ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Menyimpan...
+              </>
+            ) : printSettingsSaved ? (
+              <>
+                <Check className="w-3.5 h-3.5 text-emerald-300" /> Tersimpan!
+              </>
+            ) : (
+              <>
+                <Printer className="w-3.5 h-3.5" /> Simpan Format Dokumen
+              </>
+            )}
+          </button>
+        </div>
+
+        <p className="text-xs text-[#475569] font-medium leading-relaxed mb-4">
+          Atur format standar cetak PDF, ukuran kertas (A4 / F4 Folio), orientasi, serta format gambar (JPEG / PNG) untuk seluruh modul cetak DATAKU.
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Default Paper Size */}
+          <div className="p-4 bg-white border-2 border-[#0F172A] rounded-xl shadow-neo-sm space-y-2">
+            <label className="text-xs font-black text-[#0F172A] uppercase flex items-center justify-between">
+              <span>1. Ukuran Kertas Default</span>
+              <span className="text-[10px] font-bold text-sky-700 bg-sky-50 px-2 py-0.5 rounded border border-sky-200">
+                {printSettings.defaultPaperSize} ({printSettings.defaultPaperSize === 'A4' ? '210 x 297 mm' : '215 x 330 mm'})
+              </span>
+            </label>
+            <p className="text-[10px] text-[#64748B] font-bold uppercase">
+              Pilih ukuran standar yang digunakan pada printer lapangan.
+            </p>
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setPrintSettings(prev => ({ ...prev, defaultPaperSize: 'A4' }))}
+                className={`py-2 px-3 rounded-xl border-2 text-xs font-extrabold cursor-pointer transition-all ${
+                  printSettings.defaultPaperSize === 'A4'
+                    ? 'bg-[#0284C7] text-white border-[#0F172A] shadow-neo-sm'
+                    : 'bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100'
+                }`}
+              >
+                📄 A4 (Standard ISO)
+              </button>
+              <button
+                type="button"
+                onClick={() => setPrintSettings(prev => ({ ...prev, defaultPaperSize: 'F4' }))}
+                className={`py-2 px-3 rounded-xl border-2 text-xs font-extrabold cursor-pointer transition-all ${
+                  printSettings.defaultPaperSize === 'F4'
+                    ? 'bg-[#0284C7] text-white border-[#0F172A] shadow-neo-sm'
+                    : 'bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100'
+                }`}
+              >
+                📑 F4 / Folio (Indonesia)
+              </button>
+            </div>
+          </div>
+
+          {/* Default Orientation */}
+          <div className="p-4 bg-white border-2 border-[#0F172A] rounded-xl shadow-neo-sm space-y-2">
+            <label className="text-xs font-black text-[#0F172A] uppercase flex items-center justify-between">
+              <span>2. Orientasi Cetak Default</span>
+              <span className="text-[10px] font-bold text-sky-700 bg-sky-50 px-2 py-0.5 rounded border border-sky-200">
+                {printSettings.defaultOrientation}
+              </span>
+            </label>
+            <p className="text-[10px] text-[#64748B] font-bold uppercase">
+              Otomatis menyesuaikan dengan jenis dan lebar kolom laporan.
+            </p>
+            <div className="grid grid-cols-3 gap-1.5 pt-1">
+              {(['Otomatis', 'Portrait', 'Landscape'] as PageOrientation[]).map((ori) => (
+                <button
+                  key={ori}
+                  type="button"
+                  onClick={() => setPrintSettings(prev => ({ ...prev, defaultOrientation: ori }))}
+                  className={`py-2 px-2 rounded-xl border-2 text-[11px] font-extrabold cursor-pointer transition-all ${
+                    printSettings.defaultOrientation === ori
+                      ? 'bg-[#0284C7] text-white border-[#0F172A] shadow-neo-sm'
+                      : 'bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100'
+                  }`}
+                >
+                  {ori === 'Otomatis' ? '⚡ Otomatis' : ori === 'Portrait' ? '↕️ Portrait' : '↔️ Landscape'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Auto Fit Checkbox */}
+          <div className="p-4 bg-white border-2 border-[#0F172A] rounded-xl shadow-neo-sm flex items-center justify-between">
+            <div>
+              <p className="text-xs font-black text-[#0F172A] uppercase">3. Auto Fit Margin & Skala</p>
+              <p className="text-[10px] text-[#64748B] font-bold mt-1 uppercase">
+                Menyesuaikan tata letak agar tabel rapi dan pas tanpa terpotong di tepi kertas.
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={printSettings.autoFitContent}
+              onChange={() => setPrintSettings(prev => ({ ...prev, autoFitContent: !prev.autoFitContent }))}
+              className="w-5 h-5 rounded border-[#0F172A] text-[#0284C7] focus:ring-[#0284C7] cursor-pointer"
+            />
+          </div>
+
+          {/* Default Image Export Format */}
+          <div className="p-4 bg-white border-2 border-[#0F172A] rounded-xl shadow-neo-sm space-y-2">
+            <label className="text-xs font-black text-[#0F172A] uppercase flex items-center justify-between">
+              <span>4. Format Gambar Export</span>
+              <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                {printSettings.defaultImageFormat}
+              </span>
+            </label>
+            <p className="text-[10px] text-[#64748B] font-bold uppercase">
+              Format saat men-download laporan sebagai gambar WhatsApp atau arsip ZIP.
+            </p>
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setPrintSettings(prev => ({ ...prev, defaultImageFormat: 'JPEG' }))}
+                className={`py-2 px-3 rounded-xl border-2 text-xs font-extrabold cursor-pointer transition-all ${
+                  printSettings.defaultImageFormat === 'JPEG'
+                    ? 'bg-purple-600 text-white border-[#0F172A] shadow-neo-sm'
+                    : 'bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100'
+                }`}
+              >
+                🖼️ JPEG (Ukuran Kecil)
+              </button>
+              <button
+                type="button"
+                onClick={() => setPrintSettings(prev => ({ ...prev, defaultImageFormat: 'PNG' }))}
+                className={`py-2 px-3 rounded-xl border-2 text-xs font-extrabold cursor-pointer transition-all ${
+                  printSettings.defaultImageFormat === 'PNG'
+                    ? 'bg-purple-600 text-white border-[#0F172A] shadow-neo-sm'
+                    : 'bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100'
+                }`}
+              >
+                💎 PNG (Kualitas Tajam)
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Per Module Overrides */}
+        <div className="mt-4 pt-4 border-t border-[#0F172A]/10">
+          <span className="text-[10px] font-black text-[#0F172A] uppercase tracking-wider block mb-2">
+            Preset Dokumen per Modul
+          </span>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-center">
+              <span className="text-[10px] font-black text-slate-800 block uppercase">Rekap Keuangan</span>
+              <span className="text-[9px] font-bold text-sky-700 uppercase mt-0.5 block">{printSettings.perDocumentSettings.rekapKeuangan.paperSize} • {printSettings.perDocumentSettings.rekapKeuangan.orientation}</span>
+            </div>
+            <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-center">
+              <span className="text-[10px] font-black text-slate-800 block uppercase">Alur Keuangan</span>
+              <span className="text-[9px] font-bold text-sky-700 uppercase mt-0.5 block">{printSettings.perDocumentSettings.rekapKeuangan.paperSize} • {printSettings.perDocumentSettings.rekapKeuangan.orientation}</span>
+            </div>
+            <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-center">
+              <span className="text-[10px] font-black text-slate-800 block uppercase">Upah Tukang</span>
+              <span className="text-[9px] font-bold text-sky-700 uppercase mt-0.5 block">{printSettings.perDocumentSettings.rekapUpah.paperSize} • {printSettings.perDocumentSettings.rekapUpah.orientation}</span>
+            </div>
+            <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-center">
+              <span className="text-[10px] font-black text-slate-800 block uppercase">Laporan Harian</span>
+              <span className="text-[9px] font-bold text-sky-700 uppercase mt-0.5 block">{printSettings.perDocumentSettings.laporanProyek.paperSize} • {printSettings.perDocumentSettings.laporanProyek.orientation}</span>
+            </div>
+          </div>
+        </div>
+      </Card>
+
 
       {/* 4. BACKUP & RESTORE DATABASE JSON */}
       <Card className="p-5 select-none bg-[#F8FAFC]">

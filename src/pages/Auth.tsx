@@ -218,8 +218,13 @@ export const AuthScreen: React.FC<AuthProps> = ({ onAuthSuccess }) => {
       <div className="min-h-screen bg-[#FAF8FF] flex flex-col items-center justify-center p-6 select-none">
         <div className="text-center space-y-6 max-w-sm">
           {/* Main Logo Icon */}
-          <div className="w-24 h-24 rounded-3xl bg-[#FBBF24] border-3.5 border-[#0F172A] shadow-neo flex items-center justify-center text-5xl mx-auto animate-bounce">
-            🔨
+          <div className="w-28 h-28 rounded-3xl bg-white border-3.5 border-[#0F172A] shadow-neo flex items-center justify-center p-2 mx-auto">
+            <img
+              src="/LOGO.png"
+              alt="DATAKU"
+              className="w-full h-full object-contain"
+              referrerPolicy="no-referrer"
+            />
           </div>
 
           <div className="space-y-2">
@@ -265,8 +270,13 @@ export const AuthScreen: React.FC<AuthProps> = ({ onAuthSuccess }) => {
 
       <Card className="w-full max-w-md p-6 sm:p-8">
         <div className="text-center space-y-2 mb-6 select-none">
-          <div className="w-14 h-14 rounded-2xl bg-[#FBBF24] border-2.5 border-[#0F172A] shadow-neo-sm flex items-center justify-center text-3xl mx-auto mb-2">
-            👷
+          <div className="w-16 h-16 rounded-2xl bg-white border-2.5 border-[#0F172A] shadow-neo-sm flex items-center justify-center p-1.5 mx-auto mb-2">
+            <img
+              src="/LOGO.png"
+              alt="DATAKU"
+              className="w-full h-full object-contain"
+              referrerPolicy="no-referrer"
+            />
           </div>
           <h2 className="text-2xl font-chunky text-[#0F172A] uppercase">Masuk DATAKU</h2>
           <p className="text-xs text-[#64748B] font-bold uppercase">Akses Dasbor & Manajemen Lapangan Anda</p>

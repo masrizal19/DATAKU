@@ -9,14 +9,17 @@ export const SUPABASE_PUBLISHABLE_KEY = supabasePublishableKey;
 export const hasSupabaseUrl = Boolean(
   supabaseUrl &&
   (supabaseUrl.startsWith('http://') || supabaseUrl.startsWith('https://')) &&
-  !supabaseUrl.includes('MASUKKAN_SUPABASE_URL')
+  !supabaseUrl.includes('MASUKKAN_SUPABASE_URL') &&
+  !supabaseUrl.includes('placeholder') &&
+  !supabaseUrl.includes('example.com')
 );
 
 export const hasSupabasePublishableKey = Boolean(
   supabasePublishableKey &&
   supabasePublishableKey !== 'placeholder-publishable-key' &&
   supabasePublishableKey.length > 10 &&
-  !supabasePublishableKey.includes('MASUKKAN_SUPABASE_')
+  !supabasePublishableKey.includes('MASUKKAN_SUPABASE_') &&
+  !supabasePublishableKey.includes('placeholder')
 );
 
 export const isSupabaseConfigured = hasSupabaseUrl && hasSupabasePublishableKey;

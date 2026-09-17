@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { DEFAULT_NAVIGATION_CONFIG } from '../services/identityService';
 import {
   Home,
   Briefcase,
@@ -23,6 +24,7 @@ import {
   BarChart2
 } from 'lucide-react';
 import { Card } from './Common';
+import { AppBrand } from './AppBrand';
 
 interface NavigationProps {
   currentTab: string;
@@ -43,8 +45,9 @@ export const DesktopSidebar: React.FC<NavigationProps> = ({
   isOpen = false,
   onClose
 }) => {
-  const { state, logoutUser } = useApp();
+  const { state, identityConfig, logoutUser } = useApp();
   const unreadNotifs = state.notifications.filter(n => !n.isRead).length;
+  const navCfg = identityConfig?.navigationSettings || DEFAULT_NAVIGATION_CONFIG;
 
   const menuItems = [
     { id: 'beranda', label: 'Beranda', icon: Home },
@@ -66,6 +69,11 @@ export const DesktopSidebar: React.FC<NavigationProps> = ({
     }
   };
 
+  const weightClass = 
+    navCfg.textWeight === 'regular' ? 'font-normal' :
+    navCfg.textWeight === 'medium' ? 'font-medium' :
+    navCfg.textWeight === 'semibold' ? 'font-semibold' : 'font-bold';
+
   return (
     <>
       {/* Semi-transparent dark overlay backdrop behind the mobile drawer */}
@@ -84,17 +92,7 @@ export const DesktopSidebar: React.FC<NavigationProps> = ({
         <div className="space-y-6">
           {/* Logo & Close button row */}
           <div className="flex items-center justify-between px-1 py-2">
-            <div className="flex items-center gap-2.5">
-              <div className="w-10 h-10 rounded-xl bg-[#FBBF24] border-2 border-[#0F172A] shadow-neo-sm flex items-center justify-center font-chunky text-lg text-[#0F172A]">
-                🔨
-              </div>
-              <div>
-                <h1 className="text-2xl font-chunky text-[#0F172A] leading-none tracking-tight">DATAKU</h1>
-                <span className="text-[9px] font-extrabold uppercase bg-[#38BDF8] text-[#0F172A] px-1.5 py-0.5 rounded border border-[#0F172A] mt-1 inline-block shadow-neo-sm">
-                  SISTEM MANDOR
-                </span>
-              </div>
-            </div>
+            <AppBrand variant="sidebar" />
 
             {/* Mobile close button (✕) with touch target >= 44x44px */}
             <button
@@ -107,7 +105,7 @@ export const DesktopSidebar: React.FC<NavigationProps> = ({
           </div>
 
           {/* Sidebar Menu */}
-          <nav className="space-y-1.5 overflow-y-auto max-h-[60vh] no-scrollbar">
+          <nav className="overflow-y-auto max-h-[60vh] no-scrollbar" style={{ display: 'flex', flexDirection: 'column', gap: `${navCfg.menuGap}px` }}>
             {menuItems.map((item) => {
               const Icon = item.icon;
               const isActive = currentTab === item.id;
@@ -115,21 +113,35 @@ export const DesktopSidebar: React.FC<NavigationProps> = ({
                 <button
                   key={item.id}
                   onClick={() => handleTabSelect(item.id)}
-                  className={`w-full flex items-center gap-3.5 px-4 py-3 rounded-xl border-2 transition-all font-bold text-sm cursor-pointer ${
+                  style={{
+                    boxSizing: 'border-box',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: `${navCfg.iconTextGap}px`,
+                    padding: `${navCfg.activePaddingY}px ${navCfg.activePaddingX}px`,
+                    borderRadius: `${navCfg.activeRadius}px`,
+                    fontSize: `${navCfg.textSize}px`,
+                    backgroundColor: isActive ? navCfg.activeBackgroundColor : 'transparent',
+                    color: isActive ? navCfg.activeTextColor : '#475569',
+                    borderWidth: `${isActive && navCfg.activeOutlineEnabled ? navCfg.activeOutlineWidth : 2}px`,
+                    borderColor: isActive && navCfg.activeOutlineEnabled ? navCfg.activeOutlineColor : 'transparent',
+                    borderStyle: 'solid',
+                  }}
+                  className={`w-full transition-all cursor-pointer ${weightClass} ${
                     isActive
-                      ? 'bg-[#E0F2FE] text-[#0F172A] border-[#0F172A] shadow-neo-sm translate-x-[2px]'
-                      : 'bg-transparent text-[#475569] border-transparent hover:text-[#0F172A] hover:bg-[#F8FAFC]'
+                      ? 'shadow-neo-sm'
+                      : 'hover:bg-slate-50 hover:text-[#0F172A]'
                   }`}
                 >
-                  <div className="relative">
-                    <Icon className="w-4.5 h-4.5" />
+                  <div className="relative flex items-center justify-center" style={{ transform: `translateY(${navCfg.iconOffsetY}px)` }}>
+                    <Icon style={{ width: `${navCfg.iconSize}px`, height: `${navCfg.iconSize}px` }} />
                     {item.badge && item.badge > 0 ? (
                       <span className="absolute -top-1.5 -right-2 bg-red-500 text-white font-black text-[9px] rounded-full w-4 h-4 flex items-center justify-center border border-[#0F172A]">
                         {item.badge}
                       </span>
                     ) : null}
                   </div>
-                  <span>{item.label}</span>
+                  <span className="truncate">{item.label}</span>
                 </button>
               );
             })}
@@ -207,17 +219,7 @@ export const HeaderBanner: React.FC<HeaderBannerProps> = ({
       {/* MOBILE-ONLY HEADER ROW (Logo left, [ ☰ ] right) */}
       <div className="flex lg:hidden justify-between items-center w-full">
         {/* Logo Left */}
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-[#FBBF24] border border-[#0F172A] shadow-neo-sm flex items-center justify-center font-chunky text-xs text-[#0F172A]">
-            🔨
-          </div>
-          <div>
-            <h1 className="text-base font-chunky text-[#0F172A] leading-none tracking-tight">DATAKU</h1>
-            <span className="text-[7px] font-black uppercase bg-[#38BDF8] text-[#0F172A] px-1 py-0.25 rounded border border-[#0F172A] mt-0.5 inline-block leading-none">
-              SISTEM MANDOR
-            </span>
-          </div>
-        </div>
+        <AppBrand variant="mobile" />
 
         {/* Hamburger Right [ ☰ ] with Touch Target >= 44x44px */}
         <button
@@ -339,14 +341,15 @@ export const HeaderBanner: React.FC<HeaderBannerProps> = ({
 
 export const MobileBottomNav: React.FC<NavigationProps> = ({
   currentTab,
-  setTab
+  setTab,
+  onQuickActionClick
 }) => {
   const items = [
-    { id: 'beranda', label: 'Beranda', icon: Home, matchTabs: ['beranda'] },
-    { id: 'proyek', label: 'Proyek', icon: Briefcase, matchTabs: ['proyek'] },
-    { id: 'barang', label: 'Stok', icon: Layers, matchTabs: ['barang'] },
-    { id: 'keuangan', label: 'Keuangan', icon: DollarSign, matchTabs: ['keuangan', 'rekap'] },
-    { id: 'upah', label: 'Upah', icon: Users, matchTabs: ['upah'] }
+    { id: 'beranda', label: 'Beranda', icon: Home, matchTabs: ['beranda'], type: 'tab' },
+    { id: 'proyek', label: 'Proyek', icon: Briefcase, matchTabs: ['proyek'], type: 'tab' },
+    { id: 'quick_action', label: '', icon: Plus, matchTabs: [], type: 'action' },
+    { id: 'keuangan', label: 'Keuangan', icon: DollarSign, matchTabs: ['keuangan', 'rekap'], type: 'tab' },
+    { id: 'upah', label: 'Upah', icon: Users, matchTabs: ['upah'], type: 'tab' }
   ];
 
   return (
@@ -357,7 +360,22 @@ export const MobileBottomNav: React.FC<NavigationProps> = ({
       <div className="flex justify-around items-center max-w-lg mx-auto">
         {items.map((item) => {
           const Icon = item.icon;
-          const isActive = item.matchTabs.includes(currentTab);
+          const isActive = item.type === 'tab' && item.matchTabs.includes(currentTab);
+
+          if (item.type === 'action') {
+            return (
+              <button
+                key={item.id}
+                onClick={onQuickActionClick}
+                className="flex-1 flex flex-col items-center justify-center py-1 cursor-pointer focus:outline-none"
+                aria-label="Aktivitas Cepat"
+              >
+                <div className="w-11 h-11 rounded-full bg-[#FAF8FF] border-2.5 border-[#0F172A] flex items-center justify-center text-[#0F172A] shadow-neo-sm hover:bg-white active:scale-95 transition-all">
+                  <Icon className="w-6 h-6 stroke-[3]" />
+                </div>
+              </button>
+            );
+          }
 
           return (
             <button
