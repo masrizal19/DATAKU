@@ -360,7 +360,8 @@ export const DanaMasukForm: React.FC<DanaMasukFormProps> = ({ onSubmit, onCancel
   const [method, setMethod] = useState('Transfer');
   const [notes, setNotes] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
-  const [date, setDate] = useState(new Date().toISOString().substring(0, 10));
+  const [date, setDate] = useState(getJakartaDateString());
+  const [time, setTime] = useState(getJakartaTimeInputString());
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -377,7 +378,7 @@ export const DanaMasukForm: React.FC<DanaMasukFormProps> = ({ onSubmit, onCancel
       paymentMethod: method,
       notes,
       photos,
-      date: new Date(date).toISOString()
+      date
     });
   };
 
@@ -395,7 +396,10 @@ export const DanaMasukForm: React.FC<DanaMasukFormProps> = ({ onSubmit, onCancel
     <form onSubmit={handleSubmit} className="space-y-4 pr-1">
       {error && <div className="p-3 bg-red-100 border border-red-400 text-red-700 text-xs font-bold rounded-xl">⚠️ {error}</div>}
 
-      <Input label="Tanggal Transaksi *" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      <div className="grid grid-cols-2 gap-3">
+        <Input label="Tanggal *" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <Input label="Jam *" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+      </div>
       <Input
         label="Jumlah Dana (Rp) *"
         type="text"
@@ -477,7 +481,8 @@ export const BarangMasukForm: React.FC<BarangMasukFormProps> = ({ onSubmit, onCa
   const [unit, setUnit] = useState('sak');
   const [price, setPrice] = useState('');
   const [supplier, setSupplier] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().substring(0, 10));
+  const [date, setDate] = useState(getJakartaDateString());
+  const [time, setTime] = useState(getJakartaTimeInputString());
   const [notes, setNotes] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
   const [payWithProjectFunds, setPayWithProjectFunds] = useState(true);
@@ -509,7 +514,7 @@ export const BarangMasukForm: React.FC<BarangMasukFormProps> = ({ onSubmit, onCa
       supplier: supplier || 'Toko Material Lapangan',
       notes,
       photos,
-      date: new Date(date).toISOString(),
+      date: combineDateTime(date, time),
       payWithProjectFunds
     });
   };
@@ -613,7 +618,8 @@ export const BarangKeluarForm: React.FC<BarangKeluarFormProps> = ({ materials, o
   const [amount, setAmount] = useState('');
   const [purpose, setPurpose] = useState('');
   const [usedBy, setUsedBy] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().substring(0, 10));
+  const [date, setDate] = useState(getJakartaDateString());
+  const [time, setTime] = useState(getJakartaTimeInputString());
   const [notes, setNotes] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -643,7 +649,7 @@ export const BarangKeluarForm: React.FC<BarangKeluarFormProps> = ({ materials, o
       usedBy,
       notes,
       photos,
-      date: new Date(date).toISOString()
+      date: combineDateTime(date, time)
     });
   };
 
@@ -704,7 +710,8 @@ export const BarangTerpakaiForm: React.FC<BarangTerpakaiFormProps> = ({ material
   const [amount, setAmount] = useState('');
   const [purpose, setPurpose] = useState('');
   const [location, setLocation] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().substring(0, 10));
+  const [date, setDate] = useState(getJakartaDateString());
+  const [time, setTime] = useState(getJakartaTimeInputString());
   const [notes, setNotes] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -734,7 +741,7 @@ export const BarangTerpakaiForm: React.FC<BarangTerpakaiFormProps> = ({ material
       location,
       notes,
       photos,
-      date: new Date(date).toISOString()
+      date: combineDateTime(date, time)
     });
   };
 
@@ -794,7 +801,8 @@ export const PengeluaranForm: React.FC<PengeluaranFormProps> = ({ onSubmit, onCa
   const [category, setCategory] = useState('Material');
   const [recipient, setRecipient] = useState('');
   const [method, setMethod] = useState('Kas Tunai');
-  const [date, setDate] = useState(new Date().toISOString().substring(0, 10));
+  const [date, setDate] = useState(getJakartaDateString());
+  const [time, setTime] = useState(getJakartaTimeInputString());
   const [notes, setNotes] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -818,7 +826,7 @@ export const PengeluaranForm: React.FC<PengeluaranFormProps> = ({ onSubmit, onCa
       paymentMethod: method,
       notes,
       photos,
-      date: new Date(date).toISOString()
+      date: combineDateTime(date, time)
     });
   };
 
@@ -889,7 +897,7 @@ export const PengeluaranForm: React.FC<PengeluaranFormProps> = ({ onSubmit, onCa
 // --- FORM 7: BAYAR UPAH TUKANG ---
 interface UpahFormProps {
   workers: { id: string; name: string; position: string; totalWages: number; status: string }[];
-  onSubmit: (workerId: string, amountPaid: number, method: string) => void;
+  onSubmit: (workerId: string, amountPaid: number, method: string, dateStr: string) => void;
   onCancel: () => void;
 }
 
@@ -899,6 +907,8 @@ export const UpahForm: React.FC<UpahFormProps> = ({ workers, onSubmit, onCancel 
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState('Kas Tunai');
   const [error, setError] = useState<string | null>(null);
+  const [date, setDate] = useState(getJakartaDateString());
+  const [time, setTime] = useState(getJakartaTimeInputString());
 
   const currentWorker = workers.find(w => w.id === workerId);
 
@@ -914,7 +924,7 @@ export const UpahForm: React.FC<UpahFormProps> = ({ workers, onSubmit, onCancel 
       return;
     }
 
-    onSubmit(workerId, parsedAmount, method);
+    onSubmit(workerId, parsedAmount, method, combineDateTime(date, time));
   };
 
   const workerOptions = unpaidWorkers.map(w => ({

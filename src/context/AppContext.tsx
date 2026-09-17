@@ -50,7 +50,7 @@ interface AppContextType {
   addBarangMasuk: (log: { name: string; category: MaterialCategory; amount: number; unit: string; pricePerUnit: number; supplier: string; notes: string; photos: string[]; date: string; payWithProjectFunds: boolean }) => Promise<void>;
   addBarangKeluar: (log: { materialId: string; amount: number; purposeOrWork: string; usedBy: string; notes: string; photos: string[]; date: string }) => Promise<void>;
   addBarangTerpakai: (log: { materialId: string; amount: number; purposeOrWork: string; location: string; notes: string; photos: string[]; date: string }) => Promise<void>;
-  payWorker: (workerId: string, amountPaid: number, method: string) => Promise<void>;
+  payWorker: (workerId: string, amountPaid: number, method: string, date?: string) => Promise<void>;
   addWorker: (worker: Omit<Worker, 'id' | 'projectId' | 'totalWages'>) => Promise<void>;
   addDailyReport: (report: Omit<DailyReport, 'id' | 'projectId'>) => Promise<void>;
   deleteTransaction: (id: string) => Promise<void>;
@@ -515,7 +515,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           amount: Number(tx.amount) || 0,
           recipient: tx.sourceOrRecipient || 'Pemilik Proyek',
           description: tx.notes || '',
-          transaction_date: tx.date || new Date().toISOString().substring(0, 10),
+          transaction_date: tx.date || new Date().toISOString(),
           created_by: mandorUuid
         });
 
@@ -525,7 +525,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             amount: Number(tx.amount) || 0,
             source: tx.sourceOrRecipient || 'Pemilik Proyek',
             payment_method: tx.paymentMethod || 'Kas Tunai',
-            transaction_date: tx.date || new Date().toISOString().substring(0, 10),
+            transaction_date: tx.date || new Date().toISOString(),
             description: tx.notes || '',
             created_by: mandorUuid
           });
@@ -581,7 +581,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           amount: Number(tx.amount) || 0,
           recipient: tx.sourceOrRecipient || 'Penerima',
           description: tx.notes || '',
-          transaction_date: tx.date || new Date().toISOString().substring(0, 10),
+          transaction_date: tx.date || new Date().toISOString(),
           created_by: mandorUuid
         });
 
@@ -655,7 +655,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           unit_price: Number(log.pricePerUnit) || 0,
           supplier: log.supplier || '',
           purpose: log.notes || '',
-          transaction_date: log.date || new Date().toISOString().substring(0, 10),
+          transaction_date: log.date || new Date().toISOString(),
           description: log.notes || '',
           created_by: mandorUuid
         });
@@ -668,7 +668,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             amount: Number(log.amount) * Number(log.pricePerUnit),
             recipient: log.supplier || 'Toko Material',
             description: `Pembelian ${log.amount} ${log.unit} ${log.name}`,
-            transaction_date: log.date || new Date().toISOString().substring(0, 10),
+            transaction_date: log.date || new Date().toISOString(),
             created_by: mandorUuid
           });
         }
@@ -723,7 +723,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           type: 'out',
           quantity: Number(log.amount) || 0,
           purpose: log.purposeOrWork || '',
-          transaction_date: log.date || new Date().toISOString().substring(0, 10),
+          transaction_date: log.date || new Date().toISOString(),
           description: `Penggunaan oleh ${log.usedBy || 'Tukang'}: ${log.notes || ''}`.trim(),
           created_by: mandorUuid
         });
@@ -777,7 +777,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           type: 'used',
           quantity: Number(log.amount) || 0,
           purpose: log.purposeOrWork || '',
-          transaction_date: log.date || new Date().toISOString().substring(0, 10),
+          transaction_date: log.date || new Date().toISOString(),
           description: `Pemakaian di ${log.location || 'Lokasi'}: ${log.notes || ''}`.trim(),
           created_by: mandorUuid
         });
@@ -797,7 +797,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // 6. PAY WORKER
-  const payWorker = async (workerId: string, amountPaid: number, method: string) => {
+  const payWorker = async (workerId: string, amountPaid: number, method: string, dateStr?: string) => {
     if (!state.activeProjectId) {
       triggerNotification('Pilih proyek terlebih dahulu.', 'WARNING');
       return;
@@ -835,7 +835,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           week_worker_id: worker.id,
           worker_id: worker.masterWorkerId || worker.id,
           amount: Number(amountPaid) || 0,
-          payment_date: new Date().toISOString().substring(0, 10),
+          payment_date: dateStr || new Date().toISOString(), // Modified for exact time
           payment_method: method || 'Kas Tunai',
           notes: `Pembayaran Upah untuk ${worker.name} (${worker.position})`
         });
@@ -851,7 +851,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           amount: Number(amountPaid) || 0,
           recipient: worker.name,
           description: `Pembayaran Upah untuk ${worker.name} (${worker.position})`,
-          transaction_date: new Date().toISOString().substring(0, 10),
+          transaction_date: dateStr || new Date().toISOString(), // Modified for exact time
           created_by: mandorUuid
         });
 

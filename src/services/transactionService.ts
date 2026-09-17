@@ -17,6 +17,7 @@ export const transactionService = {
       // 1. Prioritas sorting: display_order ASC, created_at ASC, id ASC as fallback
       const { data, error } = await query
         .order('display_order', { ascending: true, nullsFirst: false })
+        .order('transaction_at', { ascending: true, nullsLast: true })
         .order('created_at', { ascending: true })
         .order('id', { ascending: true });
 
@@ -44,8 +45,8 @@ export const transactionService = {
           console.log(`Migrating display_order sequentially for project ${projectId}...`);
           // Urutkan berdasarkan created_at ASC, kemudian id ASC
           const sortedForMigration = [...data].sort((a, b) => {
-            const dateA = new Date(a.created_at || 0).getTime();
-            const dateB = new Date(b.created_at || 0).getTime();
+            const dateA = new Date(a.transaction_at || a.transaction_date || a.created_at || 0).getTime();
+            const dateB = new Date(b.transaction_at || b.transaction_date || b.created_at || 0).getTime();
             if (dateA !== dateB) return dateA - dateB;
             return (a.id || '').localeCompare(b.id || '');
           });
@@ -137,7 +138,8 @@ export const transactionService = {
       amount: Number(tx.amount) || 0,
       recipient: tx.recipient || '',
       description: tx.description || '',
-      transaction_date: tx.transaction_date || new Date().toISOString().substring(0, 10),
+      transaction_date: tx.transaction_date ? tx.transaction_date.substring(0, 10) : new Date().toISOString().substring(0, 10),
+      transaction_at: tx.transaction_date || new Date().toISOString(),
       display_order: displayOrder
     };
 
@@ -195,7 +197,10 @@ export const transactionService = {
     if (updates.amount !== undefined) updateData.amount = Number(updates.amount) || 0;
     if (updates.recipient !== undefined) updateData.recipient = updates.recipient;
     if (updates.description !== undefined) updateData.description = updates.description;
-    if (updates.transaction_date !== undefined) updateData.transaction_date = updates.transaction_date;
+    if (updates.transaction_date !== undefined) {
+      updateData.transaction_date = updates.transaction_date.substring(0, 10);
+      updateData.transaction_at = updates.transaction_date;
+    }
     const txType = updates.transaction_type || updates.type;
     if (txType !== undefined) updateData.transaction_type = txType;
     if (updates.display_order !== undefined) updateData.display_order = updates.display_order;
@@ -280,7 +285,7 @@ export function mapSupabaseTransactionToApp(st: SupabaseTransaction): Transactio
     id: st.id,
     projectId: st.project_id,
     type: type,
-    date: st.transaction_date || st.created_at || new Date().toISOString().substring(0, 10),
+    date: st.transaction_at || st.transaction_date || st.created_at || new Date().toISOString(),
     amount: Number(st.amount) || 0,
     category: st.category || (type === 'DANA_MASUK' ? 'Dana Masuk' : type === 'UPAH_TUKANG' ? 'Upah Tukang' : 'Pengeluaran'),
     sourceOrRecipient: st.recipient || 'Lainnya',

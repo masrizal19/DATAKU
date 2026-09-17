@@ -1,3 +1,4 @@
+import { JAKARTA_TZ } from './datetime';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -30,6 +31,7 @@ export function formatTanggal(dateStr: string): string {
     const date = new Date(dateStr);
     if (isNaN(date.getTime())) return dateStr;
     return new Intl.DateTimeFormat('id-ID', {
+      timeZone: JAKARTA_TZ,
       day: 'numeric',
       month: 'long',
       year: 'numeric',
@@ -48,12 +50,18 @@ export function formatTanggalWaktu(dateStr: string): string {
     const date = new Date(dateStr);
     if (isNaN(date.getTime())) return dateStr;
     const tgl = new Intl.DateTimeFormat('id-ID', {
+      timeZone: JAKARTA_TZ,
       day: 'numeric',
       month: 'short',
       year: 'numeric',
     }).format(date);
     
-    const waktu = date.toTimeString().split(' ')[0].substring(0, 5);
+    const waktu = new Intl.DateTimeFormat('id-ID', {
+      timeZone: JAKARTA_TZ,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).format(date).replace('.', ':');
     return `${tgl}, ${waktu}`;
   } catch (e) {
     return dateStr;

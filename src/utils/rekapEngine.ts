@@ -1,3 +1,4 @@
+import { formatTanggalWaktu } from './format';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -98,7 +99,11 @@ export function buildCurrentReportData(
     const orderB = b.displayOrder || 0;
     if (orderA !== orderB) return orderA - orderB;
     // Fallback to date ASC
-    return new Date(a.date).getTime() - new Date(b.date).getTime();
+    // Fallback to transaction_at/date ASC
+    const dateA = new Date(a.date).getTime();
+    const dateB = new Date(b.date).getTime();
+    if (dateA !== dateB) return dateA - dateB;
+    return (a.id || '').localeCompare(b.id || '');
   });
 
   // Hitung Ringkasan
@@ -478,7 +483,7 @@ export function exportReportToCSV(data: CurrentReportData): void {
   csv += 'Tanggal,Jenis,Kategori,Keterangan,Sumber/Penerima,Nominal,Status\n';
   data.mutasiDana.forEach(t => {
     const sign = t.type === 'DANA_MASUK' ? '+' : '-';
-    csv += `"${t.date.substring(0, 10)}","${t.type}","${t.category}","${escapeCsv(t.notes)}","${escapeCsv(t.sourceOrRecipient)}","${sign}${t.amount}","${t.status || 'Berhasil'}"\n`;
+    csv += `"${formatTanggalWaktu(t.date)}","${t.type}","${t.category}","${escapeCsv(t.notes)}","${escapeCsv(t.sourceOrRecipient)}","${sign}${t.amount}","${t.status || 'Berhasil'}"\n`;
   });
   csv += '\n';
 

@@ -8,6 +8,7 @@ import { useApp } from '../context/AppContext';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { Card, Button, Badge, Modal, Input, TextArea, Select } from '../components/Common';
 import { formatRupiah, formatTanggal, formatTanggalWaktu } from '../utils/format';
+import { combineDateTime } from '../utils/datetime';
 import { ProjectCalculator } from '../components/Calculator';
 import {
   TrendingUp,
@@ -439,6 +440,7 @@ export const InventoryView: React.FC = () => {
   const [editLogPurpose, setEditLogPurpose] = useState<string>('');
   const [editLogNotes, setEditLogNotes] = useState<string>('');
   const [editLogDate, setEditLogDate] = useState<string>('');
+  const [editLogTime, setEditLogTime] = useState<string>('07:00');
   const [isUpdatingLog, setIsUpdatingLog] = useState(false);
 
   // Delete Material Log states
@@ -490,7 +492,7 @@ export const InventoryView: React.FC = () => {
         supplier: editLogSupplier,
         purposeOrWork: editLogPurpose,
         notes: editLogNotes,
-        date: editLogDate
+        date: combineDateTime(editLogDate, editLogTime)
       });
       setShowEditLogModal(false);
       setEditingLog(null);
@@ -1020,6 +1022,7 @@ export const FinanceView: React.FC = () => {
   const [editRecipient, setEditRecipient] = useState<string>('');
   const [editNotes, setEditNotes] = useState<string>('');
   const [editDate, setEditDate] = useState<string>('');
+  const [editTime, setEditTime] = useState<string>('07:00');
   const [editType, setEditType] = useState<'DANA_MASUK' | 'PENGELUARAN' | 'UPAH_TUKANG'>('PENGELUARAN');
   const [isUpdatingTx, setIsUpdatingTx] = useState(false);
 
@@ -1073,7 +1076,7 @@ export const FinanceView: React.FC = () => {
         category: editCategory,
         sourceOrRecipient: editRecipient,
         notes: editNotes,
-        date: editDate,
+        date: combineDateTime(editDate, editTime),
         type: editType
       });
       setShowEditModal(false);
@@ -1331,13 +1334,7 @@ export const FinanceView: React.FC = () => {
         title={`Edit Transaksi: ${editingTx?.type === 'DANA_MASUK' ? 'Dana Masuk' : editingTx?.type === 'UPAH_TUKANG' ? 'Upah Tukang' : 'Pengeluaran'}`}
       >
         <form onSubmit={handleSaveEdit} className="space-y-4">
-          <Input
-            label="Tanggal Transaksi"
-            type="date"
-            value={editDate}
-            onChange={(e) => setEditDate(e.target.value)}
-            required
-          />
+          <div className="grid grid-cols-2 gap-3"><Input label="Tanggal Transaksi" type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} required /><Input label="Jam" type="time" value={editTime} onChange={(e) => setEditTime(e.target.value)} required /></div>
           <Input
             label="Nominal (Rp)"
             type="number"

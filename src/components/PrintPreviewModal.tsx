@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { CurrentReportData } from '../types';
-import { formatRupiah, formatTanggal } from '../utils/format';
+import { formatRupiah, formatTanggal, formatTanggalWaktu } from '../utils/format';
 import {
   Printer,
   FileSpreadsheet,
@@ -820,7 +820,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                           {page.mutasiSlice.map((tx, idx) => (
                             <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
                               <td className="p-1.5 border border-slate-300 whitespace-nowrap">
-                                {formatTanggal(tx.date)}
+                                {formatTanggalWaktu(tx.date)}
                               </td>
                               <td className="p-1.5 border border-slate-300 font-bold text-[9px] uppercase">
                                 {tx.type === 'DANA_MASUK' ? 'DANA MASUK' : 'PENGELUARAN'}

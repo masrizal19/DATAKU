@@ -141,7 +141,8 @@ export const materialService = {
       unit_price: Number(log.unit_price) || 0,
       supplier: log.supplier || '',
       purpose: log.purpose || '',
-      transaction_date: log.transaction_date || new Date().toISOString().substring(0, 10),
+      transaction_date: log.transaction_date ? log.transaction_date.substring(0, 10) : new Date().toISOString().substring(0, 10),
+      transaction_at: log.transaction_date || new Date().toISOString(),
       description: log.description || ''
     };
 
@@ -257,7 +258,7 @@ export function mapSupabaseMaterialLogToApp(smt: SupabaseMaterialTransaction, ma
     type: type,
     materialId: smt.material_id,
     materialName: matName,
-    date: smt.transaction_date || smt.created_at || new Date().toISOString().substring(0, 10),
+    date: smt.transaction_at || smt.transaction_date || smt.created_at || new Date().toISOString(),
     amount: qty,
     unit: matUnit,
     pricePerUnit: price,

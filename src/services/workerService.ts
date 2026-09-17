@@ -383,7 +383,8 @@ export const workerService = {
         week_worker_id: payment.week_worker_id || null,
         worker_id: payment.worker_id,
         amount: Number(payment.amount) || 0,
-        payment_date: payment.payment_date || new Date().toISOString().substring(0, 10),
+        payment_date: payment.payment_date ? payment.payment_date.substring(0, 10) : new Date().toISOString().substring(0, 10),
+      payment_at: payment.payment_date || new Date().toISOString(),
         payment_method: payment.payment_method || 'Kas Tunai',
         notes: payment.notes || '',
         receipt_attachment_id: payment.receipt_attachment_id || null
