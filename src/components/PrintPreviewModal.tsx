@@ -259,7 +259,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
 
     const ext = imageFormat === 'PNG' ? 'png' : 'jpg';
     const mimeType = imageFormat === 'PNG' ? 'image/png' : 'image/jpeg';
-    const baseName = getCleanBaseFilename();
+    const cleanProject = reportData.project.name.replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-');
 
     try {
       const pageElements = Array.from(
@@ -270,70 +270,47 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
         throw new Error('Tidak ada halaman yang ditemukan.');
       }
 
-      const generatedImages: { name: string; blob: Blob; dataUrl: string }[] = [];
-
       for (let i = 0; i < pageElements.length; i++) {
         const pageEl = pageElements[i];
         const pageNum = i + 1;
-        const padNum = String(pageNum).padStart(2, '0');
         setExportProgressText(`Merender Halaman ${pageNum} dari ${pageElements.length}...`);
 
-        // High Quality Render with html2canvas (scale 2.0+ for 150-200+ DPI equivalent clarity)
+        // High Quality Render with html2canvas
         const canvas = await html2canvas(pageEl, {
-          scale: 2.2,
+          scale: 2,
           useCORS: true,
-          logging: false,
+          allowTaint: false,
           backgroundColor: '#ffffff',
-          windowWidth: pageEl.scrollWidth,
-          windowHeight: pageEl.scrollHeight
+          logging: false
         });
 
-        const dataUrl = canvas.toDataURL(mimeType, 0.95);
-        const blob = await (await fetch(dataUrl)).blob();
-
-        generatedImages.push({
-          name: `${baseName}_${padNum}.${ext}`,
-          blob,
-          dataUrl
+        const blob = await new Promise<Blob>((resolve, reject) => {
+          canvas.toBlob((b) => {
+            if (b) resolve(b);
+            else reject(new Error('Canvas toBlob failed'));
+          }, mimeType, 0.95);
         });
-      }
 
-      // If exactly 1 page -> Download directly as single image
-      if (generatedImages.length === 1) {
-        const item = generatedImages[0];
+        const url = URL.createObjectURL(blob);
+        const fileName = `DATAKU-Rekap-${cleanProject}-Halaman-${pageNum}.${ext}`;
+
         const a = document.createElement('a');
-        a.href = item.dataUrl;
-        a.download = item.name;
+        a.href = url;
+        a.download = fileName;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        setDownloadSuccessInfo(`✓ Berhasil mengunduh 1 file gambar: ${item.name}`);
-      } else {
-        // If > 1 page -> Create a ZIP file using JSZip containing each page file
-        setExportProgressText('Mengemas semua halaman ke dalam arsip ZIP...');
-        const zip = new JSZip();
+        URL.revokeObjectURL(url);
 
-        generatedImages.forEach((img) => {
-          zip.file(img.name, img.blob);
-        });
-
-        const zipBlob = await zip.generateAsync({ type: 'blob' });
-        const zipUrl = URL.createObjectURL(zipBlob);
-        const zipName = `${baseName}_AllPages.zip`;
-
-        const a = document.createElement('a');
-        a.href = zipUrl;
-        a.download = zipName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(zipUrl);
-
-        setDownloadSuccessInfo(`✓ Berhasil mengunduh ${generatedImages.length} halaman gambar dalam file ${zipName}`);
+        if (pageElements.length > 1 && i < pageElements.length - 1) {
+          await new Promise((r) => setTimeout(r, 400));
+        }
       }
+
+      setDownloadSuccessInfo(`✓ Berhasil mengunduh ${pageElements.length} halaman gambar ${imageFormat}.`);
     } catch (err: any) {
       console.error('Export image failed:', err);
-      alert('Terjadi kendala saat mengekspor gambar. Silakan coba kembali.');
+      alert('Gagal mengekspor gambar. Silakan coba lagi.');
     } finally {
       setIsExportingImage(false);
       setExportProgressText('');
