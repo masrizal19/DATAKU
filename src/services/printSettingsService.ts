@@ -1,10 +1,9 @@
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { getMandorUuid } from './userService';
+import { GlobalPrintSettings, } from '../types';
+import { APP_SETTINGS_STORAGE_KEY, mapDbToPrintSettings } from './appSettingsService';
 
 export type PaperSize = 'A4' | 'F4';
 export type PageOrientation = 'Portrait' | 'Landscape' | 'Otomatis';
 export type ImageExportFormat = 'JPEG' | 'PNG';
-
 export interface DocumentPrintConfig {
   paperSize: PaperSize;
   orientation: PageOrientation;
@@ -13,19 +12,6 @@ export interface DocumentPrintConfig {
   includeLogo: boolean;
   includeKop: boolean;
   includeSignature: boolean;
-}
-
-export interface GlobalPrintSettings {
-  defaultPaperSize: PaperSize;
-  defaultOrientation: PageOrientation;
-  autoFitContent: boolean;
-  defaultImageFormat: ImageExportFormat;
-  perDocumentSettings: {
-    rekapKeuangan: DocumentPrintConfig;
-    rekapUpah: DocumentPrintConfig;
-    laporanProyek: DocumentPrintConfig;
-    slipGaji: DocumentPrintConfig;
-  };
 }
 
 export const DEFAULT_PRINT_SETTINGS: GlobalPrintSettings = {
@@ -73,25 +59,12 @@ export const DEFAULT_PRINT_SETTINGS: GlobalPrintSettings = {
   }
 };
 
-const STORAGE_KEY = 'dataku_print_settings';
-
 export const printSettingsService = {
-  /**
-   * Load print settings from localStorage with Supabase sync
-   */
   loadSettings(): GlobalPrintSettings {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
+      const stored = localStorage.getItem(APP_SETTINGS_STORAGE_KEY);
       if (stored) {
-        const parsed = JSON.parse(stored);
-        return {
-          ...DEFAULT_PRINT_SETTINGS,
-          ...parsed,
-          perDocumentSettings: {
-            ...DEFAULT_PRINT_SETTINGS.perDocumentSettings,
-            ...(parsed.perDocumentSettings || {})
-          }
-        };
+        return mapDbToPrintSettings(JSON.parse(stored));
       }
     } catch (e) {
       console.warn('Error reading local print settings:', e);
@@ -99,67 +72,12 @@ export const printSettingsService = {
     return DEFAULT_PRINT_SETTINGS;
   },
 
-  /**
-   * Save settings to localStorage & sync to Supabase mandor profile if available
-   */
   async saveSettings(settings: GlobalPrintSettings): Promise<void> {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-
-      if (isSupabaseConfigured) {
-        const mandorId = await getMandorUuid();
-        if (mandorId) {
-          // Attempt to persist in mandor's preferences / metadata column or fallback silently
-          try {
-            await supabase
-              .from('mandors')
-              .update({
-                print_settings: settings
-              } as any)
-              .eq('id', mandorId);
-          } catch (dbErr) {
-            // Non-blocking if column doesn't exist yet
-            console.warn('Silent notice: print_settings db column sync:', dbErr);
-          }
-        }
-      }
-    } catch (err) {
-      console.error('Failed to save print settings:', err);
-    }
+    // This is a no-op locally because appSettingsService.saveSettings will be used
   },
 
-  /**
-   * Fetch settings from Supabase if online, otherwise use local
-   */
   async fetchRemoteSettings(): Promise<GlobalPrintSettings> {
-    if (isSupabaseConfigured) {
-      try {
-        const mandorId = await getMandorUuid();
-        if (mandorId) {
-          const { data, error } = await supabase
-            .from('mandors')
-            .select('print_settings' as any)
-            .eq('id', mandorId)
-            .single();
-
-          if (!error && (data as any)?.print_settings) {
-            const remoteSettings = (data as any).print_settings as GlobalPrintSettings;
-            const merged = {
-              ...DEFAULT_PRINT_SETTINGS,
-              ...remoteSettings,
-              perDocumentSettings: {
-                ...DEFAULT_PRINT_SETTINGS.perDocumentSettings,
-                ...(remoteSettings.perDocumentSettings || {})
-              }
-            };
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
-            return merged;
-          }
-        }
-      } catch (err) {
-        console.warn('Failed to fetch remote print settings, using local:', err);
-      }
-    }
+    // Replaced by appSettingsService.fetchSettings in AppContext
     return this.loadSettings();
   }
 };

@@ -106,10 +106,10 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
   onClose,
   documentType = 'rekapKeuangan'
 }) => {
-  const { identityConfig } = useApp();
+  const { identityConfig, printSettings, savePrintSettings } = useApp();
 
   // Load initial settings
-  const [globalSettings, setGlobalSettings] = useState(() => printSettingsService.loadSettings());
+  const [globalSettings, setGlobalSettings] = useState(printSettings);
   const [paperSize, setPaperSize] = useState<PaperSize>(
     globalSettings.perDocumentSettings[documentType]?.paperSize || globalSettings.defaultPaperSize || 'A4'
   );
@@ -175,7 +175,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
       }
     };
     setGlobalSettings(updated);
-    await printSettingsService.saveSettings(updated);
+    if (savePrintSettings) await savePrintSettings(updated);
   };
 
   // Physical Paper Dimensions (CSS values in mm)

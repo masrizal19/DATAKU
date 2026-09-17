@@ -20,6 +20,8 @@ import { getMandorUuid } from '../services/userService';
 import { isUuidFormat } from '../utils/uuid';
 import { AppState, User, Project, Transaction, Material, MaterialLog, Worker, MasterWorker, DailyReport, Notification, MaterialCategory, AppIdentityConfig } from '../types';
 import { identityService, DEFAULT_IDENTITY_CONFIG } from '../services/identityService';
+import { appSettingsService } from '../services/appSettingsService';
+import { printSettingsService } from '../services/printSettingsService';
 import {
   initialCurrentUser,
   initialNotifications
@@ -30,7 +32,10 @@ interface AppContextType {
   identityConfig: AppIdentityConfig;
   updateIdentityConfig: (cfg: Partial<AppIdentityConfig>) => void;
   resetIdentityConfig: () => void;
-  saveIdentityConfig: (cfg?: AppIdentityConfig) => void;
+  saveIdentityConfig: (cfg?: AppIdentityConfig) => Promise<boolean>;
+  printSettings: any;
+  updatePrintSettings: (cfg: any) => void;
+  savePrintSettings: (cfg?: any) => Promise<boolean>;
   masterWorkers: MasterWorker[];
   loadWorkers: () => Promise<void>;
   loginUser: (emailOrPhone: string, mandorIdFromAuth?: string) => void;
@@ -72,35 +77,6 @@ const LOCAL_STORAGE_KEY = 'DATAKU_APP_STATE';
 const ACTIVE_PROJECT_KEY = 'dataku_active_project_id';
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [masterWorkers, setMasterWorkers] = useState<MasterWorker[]>([]);
-  const [identityConfig, setIdentityConfig] = useState<AppIdentityConfig>(() => {
-    return identityService.loadConfig();
-  });
-
-  const updateIdentityConfig = useCallback((cfg: Partial<AppIdentityConfig>) => {
-    setIdentityConfig(prev => {
-      const next = { ...prev, ...cfg };
-      identityService.saveConfig(next);
-      return next;
-    });
-  }, []);
-
-  const resetIdentityConfig = useCallback(() => {
-    const defaultCfg = identityService.resetConfig();
-    setIdentityConfig(defaultCfg);
-  }, []);
-
-  const saveIdentityConfig = useCallback((cfg?: AppIdentityConfig) => {
-    if (cfg) {
-      setIdentityConfig(cfg);
-      identityService.saveConfig(cfg);
-    } else {
-      setIdentityConfig(prev => {
-        identityService.saveConfig(prev);
-        return prev;
-      });
-    }
-  }, []);
 
   const [state, setState] = useState<AppState>(() => {
     const isAuthenticated = localStorage.getItem("dataku_auth") === "true";
@@ -128,6 +104,62 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       notifications: initialNotifications
     };
   });
+  const [masterWorkers, setMasterWorkers] = useState<MasterWorker[]>([]);
+  const [identityConfig, setIdentityConfig] = useState<AppIdentityConfig>(() => identityService.loadConfig());
+  const [printSettings, setPrintSettings] = useState<any>(() => printSettingsService.loadSettings());
+
+  // Cross-device settings fetch on login
+  useEffect(() => {
+    const fetchSettings = async () => {
+      if (state.currentUser?.id) {
+        const dbRow = await appSettingsService.fetchSettings(state.currentUser.id);
+        if (dbRow) {
+          setIdentityConfig(identityService.loadConfig());
+          setPrintSettings(printSettingsService.loadSettings());
+        }
+      }
+    };
+    fetchSettings();
+  }, [state.currentUser?.id]);
+
+  const updateIdentityConfig = useCallback((cfg: Partial<AppIdentityConfig>) => {
+    setIdentityConfig(prev => {
+      const next = { ...prev, ...cfg };
+      identityService.saveConfig(next);
+      return next;
+    });
+  }, []);
+
+  const resetIdentityConfig = useCallback(() => {
+    const defaultCfg = identityService.resetConfig();
+    setIdentityConfig(defaultCfg);
+  }, []);
+
+  const saveIdentityConfig = useCallback(async (cfg?: AppIdentityConfig): Promise<boolean> => {
+    const configToSave = cfg || identityConfig;
+    setIdentityConfig(configToSave);
+    if (state.currentUser?.id) {
+      const success = await appSettingsService.saveSettings(state.currentUser.id, configToSave, printSettings, state.currentUser);
+      if (!success) triggerNotification('Gagal menyimpan pengaturan identitas.', 'ALERT');
+      return success;
+    }
+    return true;
+  }, [identityConfig, printSettings, state.currentUser]);
+
+  const updatePrintSettings = useCallback((cfg: any) => {
+    setPrintSettings(cfg);
+  }, []);
+
+  const savePrintSettings = useCallback(async (cfg?: any): Promise<boolean> => {
+    const configToSave = cfg || printSettings;
+    setPrintSettings(configToSave);
+    if (state.currentUser?.id) {
+      const success = await appSettingsService.saveSettings(state.currentUser.id, identityConfig, configToSave, state.currentUser);
+      if (!success) triggerNotification('Gagal menyimpan pengaturan cetak.', 'ALERT');
+      return success;
+    }
+    return true;
+  }, [identityConfig, printSettings, state.currentUser]);
 
   // Domain loader for Transactions
   const loadTransactions = useCallback(async (projectId: string) => {
@@ -1393,6 +1425,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateIdentityConfig,
         resetIdentityConfig,
         saveIdentityConfig,
+        printSettings,
+        updatePrintSettings,
+        savePrintSettings,
         masterWorkers,
         loadWorkers,
         loginUser,

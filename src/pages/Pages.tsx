@@ -3175,21 +3175,15 @@ export const SettingsView: React.FC = () => {
   const [notifMaterial, setNotifMaterial] = useState(true);
 
   // Global Print & Export Settings States
-  const [printSettings, setPrintSettings] = useState<GlobalPrintSettings>(() => printSettingsService.loadSettings());
+  const { printSettings, updatePrintSettings, savePrintSettings } = useApp();
   const [isSavingPrintSettings, setIsSavingPrintSettings] = useState(false);
   const [printSettingsSaved, setPrintSettingsSaved] = useState(false);
 
-  // Load print settings from Supabase on mount
-  React.useEffect(() => {
-    printSettingsService.fetchRemoteSettings().then((settings) => {
-      setPrintSettings(settings);
-    });
-  }, []);
-
+  // Handler for saving
   const handleSavePrintSettings = async () => {
     setIsSavingPrintSettings(true);
     try {
-      await printSettingsService.saveSettings(printSettings);
+      await savePrintSettings(printSettings);
       setPrintSettingsSaved(true);
       setTimeout(() => setPrintSettingsSaved(false), 3000);
     } catch (err) {
@@ -3198,6 +3192,9 @@ export const SettingsView: React.FC = () => {
       setIsSavingPrintSettings(false);
     }
   };
+  
+  // Handler for updates
+  const setPrintSettings = updatePrintSettings;
 
   // File restore helper reference
   const fileInputRef = React.useRef<HTMLInputElement>(null);

@@ -1,3 +1,4 @@
+import { RpcTest } from "./components/RpcTest";
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -563,6 +564,7 @@ const MainAppContent: React.FC = () => {
 export default function App() {
   return (
     <AppProvider>
+      <RpcTest />
       <MainAppContent />
     </AppProvider>
   );

@@ -104,10 +104,15 @@ export const IdentitySettingsSection: React.FC = () => {
   };
 
   // Save changes
-  const handleSave = () => {
-    saveIdentityConfig(formData);
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3000);
+  const [isSaving, setIsSaving] = useState(false);
+  const handleSave = async () => {
+    setIsSaving(true);
+    const success = await saveIdentityConfig(formData);
+    setIsSaving(false);
+    if (success) {
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    }
   };
 
   // Adjust logo scale with +/- buttons
@@ -147,6 +152,7 @@ export const IdentitySettingsSection: React.FC = () => {
             variant="primary"
             size="sm"
             onClick={handleSave}
+            disabled={isSaving}
             className="flex items-center gap-1.5 border-2 text-xs font-black shadow-neo-sm"
           >
             {saveSuccess ? (
@@ -1268,7 +1274,7 @@ export const IdentitySettingsSection: React.FC = () => {
       {/* BOTTOM ACTION BAR */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 bg-white rounded-2xl border-2.5 border-[#0F172A] shadow-neo">
         <div className="text-xs font-bold text-slate-600">
-          💡 Pengaturan tersimpan secara instan di preview lokal. Tidak ada perubahan database/SQL.
+          💡 Pratinjau otomatis. Klik "Simpan Pengaturan" agar tersimpan ke Database untuk semua perangkat.
         </div>
         <div className="flex items-center gap-3 w-full sm:w-auto">
           <Button

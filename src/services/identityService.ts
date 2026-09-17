@@ -1,9 +1,5 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import { AppIdentityConfig, NavigationConfig } from '../types';
+import { APP_SETTINGS_STORAGE_KEY, mapDbToIdentity } from './appSettingsService';
 
 export const DEFAULT_NAVIGATION_CONFIG: NavigationConfig = {
   activeOutlineEnabled: true,
@@ -30,15 +26,15 @@ export const DEFAULT_IDENTITY_CONFIG: AppIdentityConfig = {
   appName: 'DATAKU',
   tagline: 'SISTEM MANDOR',
   logoUrl: '/LOGO.png',
-  logoScale: 100, // in percent (25% - 300%)
-  logoX: 0, // px
-  logoY: 0, // px
-  logoNameGap: 10, // px
-  appNameSize: 24, // px
-  appNameX: 0, // px
-  appNameY: 0, // px
-  taglineSize: 9, // px
-  taglineGap: 4, // px
+  logoScale: 100,
+  logoX: 0,
+  logoY: 0,
+  logoNameGap: 10,
+  appNameSize: 24,
+  appNameX: 0,
+  appNameY: 0,
+  taglineSize: 9,
+  taglineGap: 4,
   appNameColor: '#0F172A',
   taglineColor: '#0F172A',
   taglineBgColor: '#38BDF8',
@@ -50,39 +46,24 @@ export const DEFAULT_IDENTITY_CONFIG: AppIdentityConfig = {
   navigationSettings: DEFAULT_NAVIGATION_CONFIG,
 };
 
-const STORAGE_KEY = 'DATAKU_APP_IDENTITY_CONFIG';
-
 export const identityService = {
   loadConfig(): AppIdentityConfig {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
+      const stored = localStorage.getItem(APP_SETTINGS_STORAGE_KEY);
       if (stored) {
-        const parsed = JSON.parse(stored);
-        return {
-          ...DEFAULT_IDENTITY_CONFIG,
-          ...parsed,
-        };
+        return mapDbToIdentity(JSON.parse(stored));
       }
     } catch (e) {
-      console.warn('[identityService] Failed to load identity config from localStorage:', e);
+      console.warn('[identityService] Failed to load identity config from cache:', e);
     }
     return { ...DEFAULT_IDENTITY_CONFIG };
   },
 
   saveConfig(config: AppIdentityConfig): void {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-    } catch (e) {
-      console.warn('[identityService] Failed to save identity config to localStorage:', e);
-    }
+    // This is a no-op locally because appSettingsService.saveSettings will be used for actual persistence
   },
 
   resetConfig(): AppIdentityConfig {
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch (e) {
-      console.warn('[identityService] Failed to clear identity config from localStorage:', e);
-    }
     return { ...DEFAULT_IDENTITY_CONFIG };
   }
 };
