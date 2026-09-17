@@ -8,17 +8,22 @@ export const materialService = {
     if (!isSupabaseConfigured) {
       return [];
     }
-    let query = supabase.from('materials').select('*');
-    if (projectId && isUuidFormat(projectId)) {
-      query = query.eq('project_id', String(projectId));
-    }
-    const { data, error } = await query.order('name', { ascending: true });
+    try {
+      let query = supabase.from('materials').select('*');
+      if (projectId && isUuidFormat(projectId)) {
+        query = query.eq('project_id', String(projectId));
+      }
+      const { data, error } = await query.order('name', { ascending: true });
 
-    if (error) {
-      console.error('Error getting materials:', error);
-      throw error;
+      if (error) {
+        console.warn('Error getting materials:', error.message);
+        return [];
+      }
+      return data || [];
+    } catch (err: any) {
+      console.warn('Network error getting materials:', err?.message || err);
+      return [];
     }
-    return data || [];
   },
 
   async createMaterial(material: {
@@ -87,17 +92,22 @@ export const materialService = {
     if (!isSupabaseConfigured) {
       return [];
     }
-    let query = supabase.from('material_transactions').select('*');
-    if (projectId && isUuidFormat(projectId)) {
-      query = query.eq('project_id', String(projectId));
-    }
-    const { data, error } = await query.order('transaction_date', { ascending: false });
+    try {
+      let query = supabase.from('material_transactions').select('*');
+      if (projectId && isUuidFormat(projectId)) {
+        query = query.eq('project_id', String(projectId));
+      }
+      const { data, error } = await query.order('transaction_date', { ascending: false });
 
-    if (error) {
-      console.error('Error getting material transactions:', error);
-      throw error;
+      if (error) {
+        console.warn('Error getting material transactions:', error.message);
+        return [];
+      }
+      return data || [];
+    } catch (err: any) {
+      console.warn('Network error getting material transactions:', err?.message || err);
+      return [];
     }
-    return data || [];
   },
 
   async createMaterialTransaction(log: {

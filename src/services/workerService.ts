@@ -83,13 +83,13 @@ export const workerService = {
 
       const { data, error } = await query;
       if (error) {
-        console.error('Error fetching dataku_workers:', error);
-        throw error;
+        console.warn('Error fetching dataku_workers:', error.message);
+        return [];
       }
       return (data as DatakuWorker[]) || [];
-    } catch (err) {
-      console.error('Failed to load master workers:', err);
-      throw err;
+    } catch (err: any) {
+      console.warn('Failed to load master workers:', err?.message || err);
+      return [];
     }
   },
 
@@ -226,13 +226,13 @@ export const workerService = {
       }
       const { data, error } = await query.order('created_at', { ascending: true });
       if (error) {
-        console.error('Error fetching dataku_week_workers:', error);
-        throw error;
+        console.warn('Error fetching dataku_week_workers:', error.message);
+        return [];
       }
       return (data as DatakuWeekWorker[]) || [];
-    } catch (err) {
-      console.error('Failed to load week workers:', err);
-      throw err;
+    } catch (err: any) {
+      console.warn('Failed to load week workers:', err?.message || err);
+      return [];
     }
   },
 
@@ -351,13 +351,13 @@ export const workerService = {
       }
       const { data, error } = await query.order('payment_date', { ascending: false });
       if (error) {
-        console.error('Error fetching dataku_worker_payments:', error);
-        throw error;
+        console.warn('Error fetching dataku_worker_payments:', error.message);
+        return [];
       }
       return (data as DatakuWorkerPayment[]) || [];
-    } catch (err) {
-      console.error('Failed to load worker payments:', err);
-      throw err;
+    } catch (err: any) {
+      console.warn('Failed to load worker payments:', err?.message || err);
+      return [];
     }
   },
 

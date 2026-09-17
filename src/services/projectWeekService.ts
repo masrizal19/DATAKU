@@ -29,14 +29,14 @@ export const projectWeekService = {
       const { data, error } = await query.order('week_number', { ascending: true });
 
       if (error) {
-        console.error('Error fetching dataku_project_weeks:', error);
-        throw error;
+        console.warn('Error fetching dataku_project_weeks:', error.message);
+        return [];
       }
 
       return (data as DatakuProjectWeek[]) || [];
-    } catch (err) {
-      console.error('Failed to load dataku_project_weeks:', err);
-      throw err;
+    } catch (err: any) {
+      console.warn('Failed to load dataku_project_weeks:', err?.message || err);
+      return [];
     }
   },
 
