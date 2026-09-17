@@ -632,7 +632,10 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                 }}
               >
                 {/* On-Screen Subtle Page Header Indicator (Hidden when printing/exporting) */}
-                <div className="no-print absolute -top-3 left-4 bg-[#0F172A] text-white text-[9px] font-extrabold uppercase px-2 py-0.5 rounded shadow-neo-sm tracking-wider">
+                <div 
+                  className="print:hidden absolute -top-3 left-4 bg-[#0F172A] text-white text-[9px] font-extrabold uppercase px-2 py-0.5 rounded shadow-neo-sm tracking-wider"
+                  data-html2canvas-ignore="true"
+                >
                   Halaman {pageNum} dari {totalPageCount} ({paperSize} {effectiveOrientation})
                 </div>
 
@@ -769,17 +772,20 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                       </div>
 
                       {/* Rincian Persentase Pengeluaran Berdasarkan Kategori */}
-                      <div className="mt-3 border-t border-slate-200 pt-2.5">
+                      <div className="mt-3 border-t border-slate-200 pt-2.5 break-inside-avoid">
                         <span className="text-slate-500 text-[9px] font-extrabold uppercase block mb-1">
                           Rincian Persentase Pengeluaran Berdasarkan Kategori
                         </span>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px]">
+                        <div 
+                          className="grid gap-2 text-[10px]"
+                          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))' }}
+                        >
                           {categoriesList.map((c, idx) => (
-                            <div key={idx} className="bg-slate-50 p-1.5 rounded border border-slate-200">
-                              <span className="text-slate-600 font-extrabold uppercase block truncate">{c.name}</span>
-                              <span className="font-extrabold text-slate-950 block mt-0.5">
+                            <div key={idx} className="bg-slate-50 p-1.5 rounded border border-slate-200 h-auto break-inside-avoid flex flex-col justify-center">
+                              <span className="text-slate-600 font-extrabold uppercase block break-words whitespace-normal leading-tight">{c.name}</span>
+                              <span className="font-extrabold text-slate-950 block mt-0.5 break-words whitespace-normal leading-tight">
                                 {formatRupiah(c.amount)}{' '}
-                                <span className="text-slate-500 font-normal">({c.percentage}%)</span>
+                                <span className="text-slate-500 font-normal inline-block">({c.percentage}%)</span>
                               </span>
                             </div>
                           ))}
@@ -820,7 +826,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                                 {tx.type === 'DANA_MASUK' ? 'DANA MASUK' : 'PENGELUARAN'}
                               </td>
                               <td className="p-1.5 border border-slate-300 font-semibold">{tx.category}</td>
-                              <td className="p-1.5 border border-slate-300 text-slate-600 italic max-w-[160px] truncate">
+                              <td className="p-1.5 border border-slate-300 text-slate-600 italic break-words whitespace-normal min-w-[120px]">
                                 {tx.notes || '-'}
                               </td>
                               <td className="p-1.5 border border-slate-300 font-bold uppercase">
