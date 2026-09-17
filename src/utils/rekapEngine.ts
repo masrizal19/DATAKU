@@ -9,7 +9,7 @@ import { getJakartaDateString, getJakartaFullDateTime, getProjectWeeks, ProjectW
 import { formatRupiah, formatTanggal } from './format';
 
 export interface ReportFilterOptions {
-  periode: 'hari' | 'minggu' | 'bulan' | 'custom' | 'project_week';
+  periode: 'semua' | 'hari' | 'minggu' | 'minggu_ini' | 'bulan' | 'tahun' | 'custom' | 'project_week';
   weekNumber?: number;
   startDate?: string;
   endDate?: string;
@@ -35,7 +35,7 @@ export function buildCurrentReportData(
   if (!project) return null;
 
   const todayStr = getJakartaDateString();
-  const weeks = getProjectWeeks(project.startDate || '2026-09-01', 8);
+  const weeks = getProjectWeeks(project.startDate || '2026-09-01', 12);
 
   let dateStart = '';
   let dateEnd = '';
@@ -43,6 +43,12 @@ export function buildCurrentReportData(
   let weekNum: number | undefined = undefined;
 
   switch (options.periode) {
+    case 'semua': {
+      dateStart = '2020-01-01';
+      dateEnd = '2099-12-31';
+      periodLabel = 'SEMUA PERIODE PROYEK';
+      break;
+    }
     case 'hari': {
       dateStart = todayStr;
       dateEnd = todayStr;
@@ -58,14 +64,33 @@ export function buildCurrentReportData(
       periodLabel = `7 HARI TERAKHIR (${formatTanggal(dateStart)} s/d ${formatTanggal(dateEnd)})`;
       break;
     }
+    case 'minggu_ini': {
+      // Cari minggu yang mencakup hari ini
+      const currentWeek = weeks.find(w => todayStr >= w.startDate && todayStr <= w.endDate) || weeks[0];
+      weekNum = currentWeek.weekNumber;
+      dateStart = currentWeek.startDate;
+      dateEnd = currentWeek.endDate;
+      periodLabel = `MINGGU INI (${currentWeek.label.toUpperCase()}: ${formatTanggal(dateStart)} s/d ${formatTanggal(dateEnd)})`;
+      break;
+    }
     case 'bulan': {
       // Bulan berjalan
       const y = todayStr.substring(0, 4);
       const m = todayStr.substring(5, 7);
       dateStart = `${y}-${m}-01`;
-      dateEnd = todayStr;
+      // Hari terakhir di bulan ini
+      const lastDay = new Date(Number(y), Number(m), 0).getDate();
+      dateEnd = `${y}-${m}-${String(lastDay).padStart(2, '0')}`;
       const monthName = new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' }).format(new Date());
       periodLabel = `BULAN ${monthName.toUpperCase()}`;
+      break;
+    }
+    case 'tahun': {
+      // Tahun berjalan
+      const y = todayStr.substring(0, 4);
+      dateStart = `${y}-01-01`;
+      dateEnd = `${y}-12-31`;
+      periodLabel = `TAHUN ${y}`;
       break;
     }
     case 'project_week': {
@@ -73,7 +98,7 @@ export function buildCurrentReportData(
       const selectedWeek = weeks.find(w => w.weekNumber === weekNum) || weeks[0];
       dateStart = selectedWeek.startDate;
       dateEnd = selectedWeek.endDate;
-      periodLabel = selectedWeek.label.toUpperCase();
+      periodLabel = `${selectedWeek.label.toUpperCase()} (${formatTanggal(dateStart)} s/d ${formatTanggal(dateEnd)})`;
       break;
     }
     case 'custom': {

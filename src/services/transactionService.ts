@@ -318,7 +318,7 @@ export function mapSupabaseTransactionToApp(st: SupabaseTransaction): Transactio
     id: st.id,
     projectId: st.project_id,
     type: type,
-    date: st.transaction_date || st.created_at || new Date().toISOString(),
+    date: (st as any).transaction_at || st.transaction_date || st.created_at || new Date().toISOString(),
     amount: Number(st.amount) || 0,
     category: st.category || (type === 'DANA_MASUK' ? 'Dana Masuk' : type === 'UPAH_TUKANG' ? 'Upah Tukang' : 'Pengeluaran'),
     sourceOrRecipient: st.recipient || 'Lainnya',

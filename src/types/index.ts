@@ -135,7 +135,7 @@ export interface CurrentReportData {
     startDate: string;
   };
   period: {
-    type: 'hari' | 'minggu' | 'bulan' | 'custom' | 'project_week';
+    type: 'semua' | 'hari' | 'minggu' | 'minggu_ini' | 'bulan' | 'tahun' | 'custom' | 'project_week';
     weekNumber?: number;
     startDate: string;
     endDate: string;

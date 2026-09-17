@@ -170,3 +170,85 @@ export function combineDateTime(dateStr: string, timeStr: string): string {
   if (!timeStr) timeStr = getJakartaTimeInputString();
   return `${dateStr}T${timeStr}:00+07:00`;
 }
+
+/**
+ * Menghitung nomor minggu proyek secara otomatis berdasarkan tanggal transaksi dan tanggal mulai proyek.
+ * Mendukung minggu melintasi batas pergantian bulan dengan sempurna.
+ */
+export function getWeekNumberForDate(dateStr: string, projectStartDateStr: string): number {
+  const cleanDate = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
+  const cleanStart = projectStartDateStr.includes('T') ? projectStartDateStr.split('T')[0] : projectStartDateStr;
+  
+  const dDate = new Date(cleanDate + 'T12:00:00');
+  const dStart = new Date(cleanStart + 'T12:00:00');
+  
+  if (isNaN(dDate.getTime()) || isNaN(dStart.getTime())) {
+    return 1;
+  }
+  
+  const diffTime = dDate.getTime() - dStart.getTime();
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  
+  if (diffDays < 0) {
+    return 1; // Transaksi sebelum proyek dimulai otomatis masuk Minggu 1
+  }
+  
+  return Math.floor(diffDays / 7) + 1;
+}
+
+/**
+ * Menghasilkan metadata periode lengkap (Minggu, Bulan Tahun, Tanggal, Jam WIB)
+ * dari ISO string transaksi untuk konsistensi seluruh modul.
+ */
+export function getTransactionPeriodMetadata(dateIsoStr: string, projectStartDateStr: string) {
+  const cleanDate = dateIsoStr.includes('T') ? dateIsoStr.split('T')[0] : dateIsoStr;
+  const weekNum = getWeekNumberForDate(cleanDate, projectStartDateStr);
+  
+  let monthYearLabel = '';
+  try {
+    const d = new Date(cleanDate + 'T12:00:00');
+    if (!isNaN(d.getTime())) {
+      monthYearLabel = new Intl.DateTimeFormat('id-ID', {
+        month: 'long',
+        year: 'numeric'
+      }).format(d);
+    }
+  } catch (e) {
+    monthYearLabel = 'September 2026';
+  }
+  
+  let dateLabel = '';
+  try {
+    const d = new Date(cleanDate + 'T12:00:00');
+    if (!isNaN(d.getTime())) {
+      dateLabel = new Intl.DateTimeFormat('id-ID', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+      }).format(d);
+    }
+  } catch (e) {
+    dateLabel = cleanDate;
+  }
+  
+  let timeLabel = '07:00 WIB';
+  try {
+    if (dateIsoStr.includes('T')) {
+      const parts = dateIsoStr.split('T');
+      const timePart = parts[1].substring(0, 5); // HH:MM
+      timeLabel = `${timePart} WIB`;
+    } else {
+      timeLabel = `${getJakartaTimeInputString(dateIsoStr)} WIB`;
+    }
+  } catch (e) {
+    // fallback
+  }
+  
+  return {
+    weekNumber: weekNum,
+    monthYear: monthYearLabel,
+    dateString: dateLabel,
+    timeString: timeLabel
+  };
+}
+

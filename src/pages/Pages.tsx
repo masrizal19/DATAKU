@@ -8,7 +8,7 @@ import { useApp } from '../context/AppContext';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { Card, Button, Badge, Modal, Input, TextArea, Select } from '../components/Common';
 import { formatRupiah, formatTanggal, formatTanggalWaktu } from '../utils/format';
-import { combineDateTime, getJakartaTimeInputString } from '../utils/datetime';
+import { combineDateTime, getJakartaTimeInputString, getTransactionPeriodMetadata } from '../utils/datetime';
 import { ProjectCalculator } from '../components/Calculator';
 import {
   TrendingUp,
@@ -1376,9 +1376,19 @@ export const FinanceView: React.FC = () => {
                     </div>
                     <div>
                       <h4 className="text-sm font-extrabold text-[#0F172A] leading-snug uppercase">{tx.sourceOrRecipient}</h4>
-                      <p className="text-[10px] text-[#64748B] font-extrabold uppercase mt-1 leading-none tracking-wide">
-                        {tx.category} • {formatTanggalWaktu(tx.date)}
-                      </p>
+                      {(() => {
+                        const meta = getTransactionPeriodMetadata(tx.date, activeProj.startDate || '2026-09-01');
+                        return (
+                          <>
+                            <p className="text-[10px] text-[#64748B] font-extrabold uppercase mt-1 leading-none tracking-wide">
+                              {tx.category} • {meta.dateString} • {meta.timeString}
+                            </p>
+                            <p className="text-[10px] text-[#0284C7] font-extrabold uppercase mt-1 leading-none tracking-wide">
+                              Minggu {meta.weekNumber} • {meta.monthYear}
+                            </p>
+                          </>
+                        );
+                      })()}
                       <p className="text-xs text-[#0F172A] font-semibold italic mt-2">"{tx.notes || 'Tidak ada catatan.'}"</p>
                       
                       {tx.photos && tx.photos.length > 0 && (
