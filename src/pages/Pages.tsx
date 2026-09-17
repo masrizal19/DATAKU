@@ -1046,12 +1046,8 @@ export const FinanceView: React.FC = () => {
   const { state, deleteTransaction, updateTransaction, updateTransactionsOrder, triggerNotification } = useApp();
   const activeProj = state.projects.find(p => p.id === state.activeProjectId);
   const [activeFilter, setActiveFilter] = useState<'SEMUA' | 'DANA_MASUK' | 'PENGELUARAN' | 'UPAH_TUKANG'>('SEMUA');
-  
-  if (!activeProj) {
-    return <div className="text-center py-8">Pilih proyek aktif terlebih dahulu.</div>;
-  }
 
-  const projectTxs = useMemo(() => state.transactions.filter(t => t.projectId === activeProj.id), [state.transactions, activeProj.id]);
+  const projectTxs = useMemo(() => state.transactions.filter(t => t.projectId === (activeProj?.id || '')), [state.transactions, activeProj?.id]);
   
   // Local transactions order to allow draft drag-and-drop
   const [localTxs, setLocalTxs] = useState<Transaction[]>([]);
@@ -1070,11 +1066,17 @@ export const FinanceView: React.FC = () => {
 
   const handleDragStart = (e: React.DragEvent, index: number) => {
     setDraggedIdx(index);
-    e.dataTransfer.effectAllowed = 'move';
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', index.toString());
+    }
   };
 
   const handleDragOver = (e: React.DragEvent, index: number) => {
     e.preventDefault();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = 'move';
+    }
   };
 
   const handleDrop = (e: React.DragEvent, targetIdx: number) => {
@@ -1101,6 +1103,20 @@ export const FinanceView: React.FC = () => {
 
   const handleDragEnd = () => {
     setDraggedIdx(null);
+  };
+
+  const moveTransaction = (index: number, direction: 'up' | 'down') => {
+    const targetIdx = direction === 'up' ? index - 1 : index + 1;
+    if (targetIdx < 0 || targetIdx >= localTxs.length) return;
+    const reordered = [...localTxs];
+    const [item] = reordered.splice(index, 1);
+    reordered.splice(targetIdx, 0, item);
+    const normalized = reordered.map((it, idx) => ({
+      ...it,
+      displayOrder: idx + 1
+    }));
+    setLocalTxs(normalized);
+    setHasPendingChanges(true);
   };
 
   const handleSaveOrder = async () => {
@@ -1132,6 +1148,10 @@ export const FinanceView: React.FC = () => {
   const [editTime, setEditTime] = useState<string>('07:00');
   const [editType, setEditType] = useState<'DANA_MASUK' | 'PENGELUARAN' | 'UPAH_TUKANG'>('PENGELUARAN');
   const [isUpdatingTx, setIsUpdatingTx] = useState(false);
+
+  if (!activeProj) {
+    return <div className="text-center py-8">Pilih proyek aktif terlebih dahulu.</div>;
+  }
 
   const currentReportData = buildCurrentReportData(state, activeProj.id, { periode: 'bulan' });
 
@@ -1367,8 +1387,28 @@ export const FinanceView: React.FC = () => {
                 <div className="flex justify-between items-start gap-2.5">
                   <div className="flex items-start gap-3">
                     {activeFilter === 'SEMUA' && (
-                      <div className="pt-2 text-slate-400 hover:text-slate-600 transition-colors cursor-grab" title="Geser untuk mengurutkan">
-                        <GripVertical className="w-4 h-4" />
+                      <div className="flex items-center gap-1.5 shrink-0 pt-1">
+                        <GripVertical className="w-4 h-4 text-slate-500 cursor-grab active:cursor-grabbing" />
+                        <div className="flex flex-col gap-0.5">
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); moveTransaction(index, 'up'); }}
+                            disabled={index === 0}
+                            className="w-5 h-5 bg-slate-100 hover:bg-slate-200 disabled:opacity-30 rounded text-[10px] font-bold flex items-center justify-center text-[#0F172A]"
+                            title="Pindahkan ke atas"
+                          >
+                            ▲
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); moveTransaction(index, 'down'); }}
+                            disabled={index === localTxs.length - 1}
+                            className="w-5 h-5 bg-slate-100 hover:bg-slate-200 disabled:opacity-30 rounded text-[10px] font-bold flex items-center justify-center text-[#0F172A]"
+                            title="Pindahkan ke bawah"
+                          >
+                            ▼
+                          </button>
+                        </div>
                       </div>
                     )}
                     <div className={`w-10 h-10 rounded-xl border-2 border-[#0F172A] shadow-neo-sm flex items-center justify-center font-bold text-sm ${tx.type === 'DANA_MASUK' ? 'bg-[#D1FAE5]' : 'bg-[#FEE2E2]'}`}>
