@@ -195,6 +195,7 @@ export interface AppState {
   workers: Worker[];
   dailyReports: DailyReport[];
   notifications: Notification[];
+  projectWeeks: any[];
 }
 
 export type PaperSize = 'A4' | 'F4';

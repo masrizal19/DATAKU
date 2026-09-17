@@ -38,6 +38,7 @@ interface AppContextType {
   savePrintSettings: (cfg?: any) => Promise<boolean>;
   masterWorkers: MasterWorker[];
   loadWorkers: () => Promise<void>;
+  addNextWeek: () => Promise<void>;
   loginUser: (emailOrPhone: string, mandorIdFromAuth?: string) => void;
   logoutUser: () => void;
   addProject: (proj: Omit<Project, 'id' | 'isArchived' | 'isActive'>) => Promise<void>;
@@ -101,7 +102,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       materialLogs: [],
       workers: [],
       dailyReports: [],
-      notifications: initialNotifications
+      notifications: initialNotifications,
+      projectWeeks: []
     };
   });
   const [masterWorkers, setMasterWorkers] = useState<MasterWorker[]>([]);
@@ -232,11 +234,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const loadWorkers = useCallback(async () => {
     if (!isSupabaseConfigured) return;
     try {
+      const activeProjId = state.activeProjectId || undefined;
       const [rawMasterWorkers, weekWorkers, payments, projectWeeks] = await Promise.all([
         workerService.getMasterWorkers(),
         workerService.getWeekWorkers(),
         workerService.getWorkerPayments(),
-        projectWeekService.getProjectWeeks()
+        projectWeekService.getProjectWeeks(activeProjId)
       ]);
 
       const mappedWorkers = mapSupabaseToAppWorkers(weekWorkers, rawMasterWorkers, payments, projectWeeks);
@@ -245,12 +248,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setMasterWorkers(mappedMasterWorkers);
       setState(prev => ({
         ...prev,
-        workers: mappedWorkers
+        workers: mappedWorkers,
+        projectWeeks: projectWeeks
       }));
     } catch (err) {
       console.error('Error loading workers from Supabase:', err);
     }
-  }, []);
+  }, [state.activeProjectId]);
 
   // Load Projects directly from Supabase
   const loadProjects = useCallback(async () => {
@@ -504,7 +508,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
     const activeProjId = state.activeProjectId;
-    const mandorUuid = await getMandorUuid(state.currentUser?.name);
+    let mandorUuid = state.currentUser?.id;
+    if (!mandorUuid || !isUuidFormat(mandorUuid)) {
+      mandorUuid = await getMandorUuid(state.currentUser?.name);
+    }
+
+    if (!mandorUuid || !isUuidFormat(mandorUuid)) {
+      console.error('[DATAKU - addDanaMasuk] ID Mandor tidak valid atau kosong. Mohon coba login kembali.');
+      triggerNotification('Gagal mencatat Dana Masuk: ID Mandor tidak valid.', 'ALERT');
+      return;
+    }
+
+    if (!activeProjId || !isUuidFormat(activeProjId)) {
+      console.error('[DATAKU - addDanaMasuk] ID Proyek aktif tidak valid.');
+      triggerNotification('Gagal mencatat Dana Masuk: ID Proyek tidak valid.', 'ALERT');
+      return;
+    }
 
     try {
       if (isSupabaseConfigured) {
@@ -549,7 +568,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       triggerNotification(`Dana Masuk sebesar Rp ${tx.amount.toLocaleString('id-ID')} berhasil disimpan ke database.`, 'INFO');
     } catch (err: any) {
-      console.error('Gagal menambah Dana Masuk:', err);
+      console.error(`[DATAKU ERROR] Gagal menambah Dana Masuk (Fitur: Akses Cepat - Dana Masuk, Tabel: transactions/funds, ProjectID: ${activeProjId}, MandorID: ${mandorUuid}, Operasi: createTransaction/createFund)`, err);
       triggerNotification(`Gagal mencatat Dana Masuk: ${err.message || 'Error'}`, 'ALERT');
       throw err;
     }
@@ -570,7 +589,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
     const activeProjId = state.activeProjectId;
-    const mandorUuid = await getMandorUuid(state.currentUser?.name);
+    let mandorUuid = state.currentUser?.id;
+    if (!mandorUuid || !isUuidFormat(mandorUuid)) {
+      mandorUuid = await getMandorUuid(state.currentUser?.name);
+    }
+
+    if (!mandorUuid || !isUuidFormat(mandorUuid)) {
+      console.error('[DATAKU - addPengeluaran] ID Mandor tidak valid atau kosong. Mohon coba login kembali.');
+      triggerNotification('Gagal mencatat Pengeluaran: ID Mandor tidak valid.', 'ALERT');
+      return;
+    }
+
+    if (!activeProjId || !isUuidFormat(activeProjId)) {
+      console.error('[DATAKU - addPengeluaran] ID Proyek aktif tidak valid.');
+      triggerNotification('Gagal mencatat Pengeluaran: ID Proyek tidak valid.', 'ALERT');
+      return;
+    }
 
     try {
       if (isSupabaseConfigured) {
@@ -601,7 +635,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       triggerNotification(`Pengeluaran sebesar Rp ${tx.amount.toLocaleString('id-ID')} berhasil disimpan ke database.`, 'INFO');
     } catch (err: any) {
-      console.error('Gagal menambah Pengeluaran:', err);
+      console.error(`[DATAKU ERROR] Gagal menambah Pengeluaran (Fitur: Akses Cepat - Pengeluaran, Tabel: transactions, ProjectID: ${activeProjId}, MandorID: ${mandorUuid}, Operasi: createTransaction)`, err);
       triggerNotification(`Gagal mencatat Pengeluaran: ${err.message || 'Error'}`, 'ALERT');
       throw err;
     }
@@ -625,7 +659,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
     const activeProjId = state.activeProjectId;
-    const mandorUuid = await getMandorUuid(state.currentUser?.name);
+    let mandorUuid = state.currentUser?.id;
+    if (!mandorUuid || !isUuidFormat(mandorUuid)) {
+      mandorUuid = await getMandorUuid(state.currentUser?.name);
+    }
+
+    if (!mandorUuid || !isUuidFormat(mandorUuid)) {
+      console.error('[DATAKU - addBarangMasuk] ID Mandor tidak valid atau kosong. Mohon coba login kembali.');
+      triggerNotification('Gagal mencatat Barang Masuk: ID Mandor tidak valid.', 'ALERT');
+      return;
+    }
+
+    if (!activeProjId || !isUuidFormat(activeProjId)) {
+      console.error('[DATAKU - addBarangMasuk] ID Proyek aktif tidak valid.');
+      triggerNotification('Gagal mencatat Barang Masuk: ID Proyek tidak valid.', 'ALERT');
+      return;
+    }
 
     try {
       if (isSupabaseConfigured) {
@@ -682,7 +731,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       triggerNotification(`Barang Masuk: ${log.amount} ${log.unit} ${log.name} berhasil disimpan ke database.`, 'INFO');
     } catch (err: any) {
-      console.error('Gagal mencatat Barang Masuk:', err);
+      console.error(`[DATAKU ERROR] Gagal mencatat Barang Masuk (Fitur: Akses Cepat - Barang Masuk, Tabel: materials/material_transactions/transactions, ProjectID: ${activeProjId}, MandorID: ${mandorUuid}, Operasi: createMaterial/createMaterialTransaction)`, err);
       triggerNotification(`Gagal mencatat Barang Masuk: ${err.message || 'Error'}`, 'ALERT');
       throw err;
     }
@@ -703,7 +752,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
     const activeProjId = state.activeProjectId;
-    const mandorUuid = await getMandorUuid(state.currentUser?.name);
+    let mandorUuid = state.currentUser?.id;
+    if (!mandorUuid || !isUuidFormat(mandorUuid)) {
+      mandorUuid = await getMandorUuid(state.currentUser?.name);
+    }
+
+    if (!mandorUuid || !isUuidFormat(mandorUuid)) {
+      console.error('[DATAKU - addBarangKeluar] ID Mandor tidak valid atau kosong. Mohon coba login kembali.');
+      triggerNotification('Gagal mencatat Barang Keluar: ID Mandor tidak valid.', 'ALERT');
+      return;
+    }
+
+    if (!activeProjId || !isUuidFormat(activeProjId)) {
+      console.error('[DATAKU - addBarangKeluar] ID Proyek aktif tidak valid.');
+      triggerNotification('Gagal mencatat Barang Keluar: ID Proyek tidak valid.', 'ALERT');
+      return;
+    }
 
     try {
       if (isSupabaseConfigured) {
@@ -736,7 +800,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       triggerNotification('Barang Keluar berhasil dicatat ke database.', 'INFO');
     } catch (err: any) {
-      console.error('Gagal mencatat Barang Keluar:', err);
+      console.error(`[DATAKU ERROR] Gagal mencatat Barang Keluar (Fitur: Akses Cepat - Barang Keluar, Tabel: materials/material_transactions, ProjectID: ${activeProjId}, MandorID: ${mandorUuid}, Operasi: updateMaterialStock/createMaterialTransaction)`, err);
       triggerNotification(`Gagal mencatat Barang Keluar: ${err.message || 'Error'}`, 'ALERT');
       throw err;
     }
@@ -757,7 +821,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
     const activeProjId = state.activeProjectId;
-    const mandorUuid = await getMandorUuid(state.currentUser?.name);
+    let mandorUuid = state.currentUser?.id;
+    if (!mandorUuid || !isUuidFormat(mandorUuid)) {
+      mandorUuid = await getMandorUuid(state.currentUser?.name);
+    }
+
+    if (!mandorUuid || !isUuidFormat(mandorUuid)) {
+      console.error('[DATAKU - addBarangTerpakai] ID Mandor tidak valid atau kosong. Mohon coba login kembali.');
+      triggerNotification('Gagal mencatat Barang Terpakai: ID Mandor tidak valid.', 'ALERT');
+      return;
+    }
+
+    if (!activeProjId || !isUuidFormat(activeProjId)) {
+      console.error('[DATAKU - addBarangTerpakai] ID Proyek aktif tidak valid.');
+      triggerNotification('Gagal mencatat Barang Terpakai: ID Proyek tidak valid.', 'ALERT');
+      return;
+    }
 
     try {
       if (isSupabaseConfigured) {
@@ -790,7 +869,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       triggerNotification('Barang Terpakai berhasil dicatat ke database.', 'INFO');
     } catch (err: any) {
-      console.error('Gagal mencatat Barang Terpakai:', err);
+      console.error(`[DATAKU ERROR] Gagal mencatat Barang Terpakai (Fitur: Akses Cepat - Barang Terpakai, Tabel: materials/material_transactions, ProjectID: ${activeProjId}, MandorID: ${mandorUuid}, Operasi: updateMaterialStock/createMaterialTransaction)`, err);
       triggerNotification(`Gagal mencatat Barang Terpakai: ${err.message || 'Error'}`, 'ALERT');
       throw err;
     }
@@ -806,7 +885,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const worker = state.workers.find(w => w.id === workerId);
     if (!worker) return;
 
-    const mandorUuid = await getMandorUuid(state.currentUser?.name);
+    let mandorUuid = state.currentUser?.id;
+    if (!mandorUuid || !isUuidFormat(mandorUuid)) {
+      mandorUuid = await getMandorUuid(state.currentUser?.name);
+    }
+
+    if (!mandorUuid || !isUuidFormat(mandorUuid)) {
+      console.error('[DATAKU - payWorker] ID Mandor tidak valid atau kosong. Mohon coba login kembali.');
+      triggerNotification('Gagal mencatat Bayar Upah: ID Mandor tidak valid.', 'ALERT');
+      return;
+    }
+
+    if (!activeProjId || !isUuidFormat(activeProjId)) {
+      console.error('[DATAKU - payWorker] ID Proyek aktif tidak valid.');
+      triggerNotification('Gagal mencatat Bayar Upah: ID Proyek tidak valid.', 'ALERT');
+      return;
+    }
 
     let newStatus: 'BELUM_DIBAYAR' | 'SEBAGIAN' | 'LUNAS' = worker.status;
     if (amountPaid >= worker.totalWages) {
@@ -868,9 +962,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       triggerNotification(`Pembayaran upah ${worker.name} berhasil dicatat ke database.`, 'INFO');
     } catch (err: any) {
-      console.error('Failed to pay worker:', err);
+      console.error(`[DATAKU ERROR] Gagal mencatat pembayaran (Fitur: Akses Cepat - Bayar Upah, Tabel: worker_payments/transactions, ProjectID: ${activeProjId}, MandorID: ${mandorUuid}, Operasi: createWorkerPayment/updateWeekWorker/createTransaction)`, err);
       triggerNotification(`Gagal mencatat pembayaran: ${err.message || 'Error'}`, 'ALERT');
       throw err;
+    }
+  };
+
+  const addNextWeek = async () => {
+    if (!state.activeProjectId) {
+      triggerNotification('Pilih proyek terlebih dahulu.', 'WARNING');
+      return;
+    }
+    try {
+      const activeProj = state.projects.find(p => p.id === state.activeProjectId);
+      await projectWeekService.addNextProjectWeek(state.activeProjectId, activeProj?.startDate);
+      await loadWorkers();
+      triggerNotification('Minggu kerja berikutnya berhasil dibuat.', 'INFO');
+    } catch (err: any) {
+      console.error('Failed to add next week:', err);
+      triggerNotification(`Gagal membuat minggu baru: ${err.message || 'Error'}`, 'ALERT');
     }
   };
 
@@ -918,6 +1028,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           throw new Error('Minggu proyek belum memiliki week_id dari database.');
         }
 
+        if (worker.weekStartDate || worker.weekEndDate) {
+          await projectWeekService.updateProjectWeek(targetWeek.id, {
+            week_start: worker.weekStartDate || targetWeek.week_start || undefined,
+            week_end: worker.weekEndDate || targetWeek.week_end || undefined
+          });
+        }
+
         const weekId = targetWeek.id;
         const notes = worker.notes || `Minggu ${targetWeekNum}`;
 
@@ -950,7 +1067,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
     const activeProjId = state.activeProjectId;
-    const mandorUuid = await getMandorUuid(state.currentUser?.name);
+    let mandorUuid = state.currentUser?.id;
+    if (!mandorUuid || !isUuidFormat(mandorUuid)) {
+      mandorUuid = await getMandorUuid(state.currentUser?.name);
+    }
+
+    if (!mandorUuid || !isUuidFormat(mandorUuid)) {
+      console.error('[DATAKU - addDailyReport] ID Mandor tidak valid atau kosong. Mohon coba login kembali.');
+      triggerNotification('Gagal mencatat Laporan Harian: ID Mandor tidak valid.', 'ALERT');
+      return;
+    }
+
+    if (!activeProjId || !isUuidFormat(activeProjId)) {
+      console.error('[DATAKU - addDailyReport] ID Proyek aktif tidak valid.');
+      triggerNotification('Gagal mencatat Laporan Harian: ID Proyek tidak valid.', 'ALERT');
+      return;
+    }
 
     try {
       if (isSupabaseConfigured) {
@@ -971,7 +1103,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       triggerNotification('Laporan harian berhasil disimpan ke database.', 'INFO');
     } catch (err: any) {
-      console.error('Gagal menyimpan laporan harian:', err);
+      console.error(`[DATAKU ERROR] Gagal menyimpan laporan harian (Fitur: Akses Cepat - Laporan Harian, Tabel: daily_reports, ProjectID: ${activeProjId}, MandorID: ${mandorUuid}, Operasi: createDailyReport)`, err);
       triggerNotification(`Gagal menyimpan laporan harian: ${err.message || 'Error'}`, 'ALERT');
       throw err;
     }
@@ -1221,6 +1353,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       materialLogs: [],
       workers: [],
       dailyReports: [],
+      projectWeeks: [],
       notifications: initialNotifications
     });
     loadProjects();
@@ -1430,6 +1563,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         savePrintSettings,
         masterWorkers,
         loadWorkers,
+        addNextWeek,
         loginUser,
         logoutUser,
         addProject,

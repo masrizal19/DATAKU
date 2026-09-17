@@ -41,8 +41,8 @@ export const projectWeekService = {
   },
 
   /**
-   * Ensure that 12 project weeks exist in public.dataku_project_weeks for the project.
-   * Creates missing weeks if needed and returns the list with valid database UUIDs.
+   * Ensure that at least "Minggu 1" exists in public.dataku_project_weeks for the project.
+   * Creates the first week if missing and returns the list with valid database UUIDs.
    */
   async ensureProjectWeeks(projectId: string, projectStartDate?: string): Promise<DatakuProjectWeek[]> {
     if (!isSupabaseConfigured || !projectId) {
@@ -51,43 +51,88 @@ export const projectWeekService = {
 
     try {
       let existing = await this.getProjectWeeks(projectId);
-      if (existing && existing.length >= 12) {
+      if (existing && existing.length > 0) {
         return existing;
       }
 
       const calculatedWeeks = calcProjectWeeks(
         projectStartDate || new Date().toISOString().substring(0, 10),
-        12
+        1
       );
 
-      const existingMap = new Map<number, DatakuProjectWeek>();
-      existing.forEach(w => existingMap.set(w.week_number, w));
+      const weeksToInsert = [{
+        project_id: String(projectId),
+        week_number: 1,
+        week_start: calculatedWeeks[0].startDate,
+        week_end: calculatedWeeks[0].endDate,
+        status: 'active',
+        notes: `Minggu 1`
+      }];
 
-      const weeksToInsert = calculatedWeeks
-        .filter(w => !existingMap.has(w.weekNumber))
-        .map(w => ({
-          project_id: String(projectId),
-          week_number: w.weekNumber,
-          week_start: w.startDate,
-          week_end: w.endDate,
-          status: 'active',
-          notes: `Minggu ${w.weekNumber}`
-        }));
+      const { error } = await supabase
+        .from('dataku_project_weeks')
+        .insert(weeksToInsert);
 
-      if (weeksToInsert.length > 0) {
-        const { error } = await supabase
-          .from('dataku_project_weeks')
-          .insert(weeksToInsert);
-
-        if (error) {
-          console.error('Error creating missing dataku_project_weeks:', error);
-        }
+      if (error) {
+        console.error('Error creating missing dataku_project_weeks:', error);
       }
 
       return await this.getProjectWeeks(projectId);
     } catch (err) {
       console.error('Failed to ensure dataku_project_weeks:', err);
       return await this.getProjectWeeks(projectId);
+    }
+  },
+
+  /**
+   * Create the next sequential week for a project.
+   * e.g., if existing has weeks 1 and 2, this will create week 3.
+   */
+  async addNextProjectWeek(projectId: string, projectStartDate?: string): Promise<DatakuProjectWeek[]> {
+    if (!isSupabaseConfigured || !projectId) {
+      return [];
+    }
+
+    try {
+      let existing = await this.getProjectWeeks(projectId);
+      if (!existing || existing.length === 0) {
+        return await this.ensureProjectWeeks(projectId, projectStartDate);
+      }
+
+      const maxWeek = Math.max(...existing.map(w => w.week_number));
+      const nextWeekNumber = maxWeek + 1;
+
+      const calculatedWeeks = calcProjectWeeks(
+        projectStartDate || new Date().toISOString().substring(0, 10),
+        nextWeekNumber
+      );
+
+      const targetWeek = calculatedWeeks.find(w => w.weekNumber === nextWeekNumber);
+      if (!targetWeek) {
+        throw new Error(`Failed to calculate dates for week ${nextWeekNumber}`);
+      }
+
+      const { error } = await supabase
+        .from('dataku_project_weeks')
+        .insert({
+          project_id: String(projectId),
+          week_number: nextWeekNumber,
+          week_start: targetWeek.startDate,
+          week_end: targetWeek.endDate,
+          status: 'active',
+          notes: `Minggu ${nextWeekNumber}`
+          // Let's not pass timestamps to let Supabase default them, or pass valid ISO
+        });
+
+      if (error) {
+        console.error('Error adding next dataku_project_week:', error);
+        throw error;
+      }
+
+      return await this.getProjectWeeks(projectId);
+    } catch (err) {
+      console.error('Failed to add next dataku_project_week:', err);
+      throw err;
     }
   },
 

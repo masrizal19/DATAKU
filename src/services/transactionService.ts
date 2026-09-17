@@ -17,7 +17,7 @@ export const transactionService = {
       // 1. Prioritas sorting: display_order ASC, created_at ASC, id ASC as fallback
       const { data, error } = await query
         .order('display_order', { ascending: true, nullsFirst: false })
-        .order('transaction_at', { ascending: true, nullsLast: true })
+        .order('transaction_date', { ascending: true, nullsFirst: false })
         .order('created_at', { ascending: true })
         .order('id', { ascending: true });
 
@@ -285,7 +285,7 @@ export function mapSupabaseTransactionToApp(st: SupabaseTransaction): Transactio
     id: st.id,
     projectId: st.project_id,
     type: type,
-    date: st.transaction_at || st.transaction_date || st.created_at || new Date().toISOString(),
+    date: st.transaction_date || st.created_at || new Date().toISOString(),
     amount: Number(st.amount) || 0,
     category: st.category || (type === 'DANA_MASUK' ? 'Dana Masuk' : type === 'UPAH_TUKANG' ? 'Upah Tukang' : 'Pengeluaran'),
     sourceOrRecipient: st.recipient || 'Lainnya',

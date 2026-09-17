@@ -258,7 +258,7 @@ export function mapSupabaseMaterialLogToApp(smt: SupabaseMaterialTransaction, ma
     type: type,
     materialId: smt.material_id,
     materialName: matName,
-    date: smt.transaction_at || smt.transaction_date || smt.created_at || new Date().toISOString(),
+    date: smt.transaction_date || smt.created_at || new Date().toISOString(),
     amount: qty,
     unit: matUnit,
     pricePerUnit: price,

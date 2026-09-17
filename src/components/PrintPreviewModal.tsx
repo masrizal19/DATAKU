@@ -796,17 +796,17 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                         <div className="border-r border-slate-200 pr-2">
                           <span className="text-slate-500 text-[9px] font-bold uppercase block">Bahan/Material</span>
                           <span className="font-extrabold text-blue-700 text-sm block mt-0.5">
-                            {formatRupiah(reportData.ringkasan.material)}
+                            {formatRupiah(reportData.ringkasan.pembelianMaterial)}
                           </span>
                         </div>
                         <div className="pl-1">
                           <span className="text-slate-500 text-[9px] font-bold uppercase block">Sisa Kas</span>
                           <span
                             className={`font-black text-sm block mt-0.5 ${
-                              reportData.ringkasan.sisaKas >= 0 ? 'text-emerald-800' : 'text-red-700'
+                              reportData.ringkasan.saldoKas >= 0 ? 'text-emerald-800' : 'text-red-700'
                             }`}
                           >
-                            {formatRupiah(reportData.ringkasan.sisaKas)}
+                            {formatRupiah(reportData.ringkasan.saldoKas)}
                           </span>
                         </div>
                       </div>
@@ -898,12 +898,12 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                         <tbody>
                           {page.upahSlice.map((w, idx) => (
                             <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
-                              <td className="p-1.5 border border-slate-300 font-bold uppercase">{w.workerName}</td>
-                              <td className="p-1.5 border border-slate-300 text-center">{w.role}</td>
+                              <td className="p-1.5 border border-slate-300 font-bold uppercase">{w.name}</td>
+                              <td className="p-1.5 border border-slate-300 text-center">{w.position}</td>
                               <td className="p-1.5 border border-slate-300 text-right">{w.daysWorked} Hari</td>
                               <td className="p-1.5 border border-slate-300 text-right">{formatRupiah(w.dailyRate)}</td>
                               <td className="p-1.5 border border-slate-300 text-right font-black text-slate-900">
-                                {formatRupiah(w.totalWage)}
+                                {formatRupiah(w.totalWages)}
                               </td>
                             </tr>
                           ))}

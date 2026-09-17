@@ -8,6 +8,8 @@ import { Button, Input, TextArea, Select } from './Common';
 import { Camera, Image, Check, Trash2, Sliders, DollarSign, Calendar, MapPin, Hammer, CloudSun, RefreshCw } from 'lucide-react';
 import { MaterialCategory } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { getJakartaDateString, getJakartaTimeInputString, combineDateTime } from '../utils/datetime';
+import { useApp } from '../context/AppContext';
 
 // Mock high quality construction photo assets for simulation
 const MOCK_PHOTOS = {
@@ -1082,25 +1084,128 @@ export const LaporanForm: React.FC<LaporanFormProps> = ({ onSubmit, onCancel }) 
 
 // --- FORM 9: TAMBAH PEKERJA BARU ---
 interface TambahPekerjaFormProps {
-  onSubmit: (data: { name: string; position: string; dailyRate: number; daysWorked: number; status: 'BELUM_DIBAYAR' | 'SEBAGIAN' | 'LUNAS' }) => void;
+  onSubmit: (data: {
+    name: string;
+    position: string;
+    dailyRate: number;
+    daysWorked: number;
+    status: 'BELUM_DIBAYAR' | 'SEBAGIAN' | 'LUNAS';
+    weekNumber: number;
+    weekStartDate?: string;
+    weekEndDate?: string;
+    masterWorkerId?: string;
+    notes?: string;
+  }) => void;
   onCancel: () => void;
 }
 
 export const TambahPekerjaForm: React.FC<TambahPekerjaFormProps> = ({ onSubmit, onCancel }) => {
+  const { state, masterWorkers, addNextWeek } = useApp();
+  
+  const [mode, setMode] = useState<'SELECT_EXISTING' | 'CREATE_NEW'>(
+    masterWorkers.length > 0 ? 'SELECT_EXISTING' : 'CREATE_NEW'
+  );
+  
+  const [selectedMasterId, setSelectedMasterId] = useState('');
   const [name, setName] = useState('');
-  const [position, setPosition] = useState('Tukang');
+  const [position, setPosition] = useState('Tukang Batu');
   const [dailyRate, setDailyRate] = useState('');
   const [daysWorked, setDaysWorked] = useState('6');
+  
+  const [selectedWeekNum, setSelectedWeekNum] = useState<string>('');
+  const [weekStartDate, setWeekStartDate] = useState('');
+  const [weekEndDate, setWeekEndDate] = useState('');
+  const [paymentStatus, setPaymentStatus] = useState<'BELUM_DIBAYAR' | 'SEBAGIAN' | 'LUNAS'>('BELUM_DIBAYAR');
+  const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [isCreatingWeek, setIsCreatingWeek] = useState(false);
+
+  const weeksList = state.projectWeeks || [];
+
+  React.useEffect(() => {
+    if (weeksList.length > 0 && !selectedWeekNum) {
+      const currentWeek = weeksList.find((w: any) => w.status === 'active') || weeksList[weeksList.length - 1];
+      if (currentWeek) {
+        setSelectedWeekNum(String(currentWeek.week_number));
+        setWeekStartDate(currentWeek.week_start || '');
+        setWeekEndDate(currentWeek.week_end || '');
+      }
+    }
+  }, [weeksList, selectedWeekNum]);
+
+  const handleWeekChange = (weekNumStr: string) => {
+    setSelectedWeekNum(weekNumStr);
+    const matched = weeksList.find((w: any) => String(w.week_number) === weekNumStr);
+    if (matched) {
+      setWeekStartDate(matched.week_start || '');
+      setWeekEndDate(matched.week_end || '');
+    }
+  };
+
+  const handleMasterChange = (id: string) => {
+    setSelectedMasterId(id);
+    const matched = masterWorkers.find(mw => mw.id === id);
+    if (matched) {
+      setName(matched.name);
+      setPosition(matched.position);
+      setDailyRate(matched.dailyRate.toString());
+    }
+  };
+
+  const handleCreateNextWeek = async () => {
+    setIsCreatingWeek(true);
+    setError(null);
+    try {
+      await addNextWeek();
+    } catch (err: any) {
+      setError(`Gagal membuat minggu baru: ${err.message}`);
+    } finally {
+      setIsCreatingWeek(false);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !dailyRate) {
-      setError('Mohon lengkapi Nama Pekerja dan Upah Harian');
+    
+    let finalName = name.trim();
+    let finalPosition = position;
+    let finalDailyRate = dailyRate;
+    let finalMasterId: string | undefined = undefined;
+
+    if (mode === 'SELECT_EXISTING') {
+      if (!selectedMasterId) {
+        setError('Mohon pilih Tukang dari Database Master');
+        return;
+      }
+      const matched = masterWorkers.find(mw => mw.id === selectedMasterId);
+      if (!matched) {
+        setError('Data Master Tukang tidak ditemukan');
+        return;
+      }
+      finalName = matched.name;
+      finalPosition = matched.position;
+      finalDailyRate = matched.dailyRate.toString();
+      finalMasterId = matched.id;
+    } else {
+      if (!finalName) {
+        setError('Mohon lengkapi Nama Lengkap Pekerja');
+        return;
+      }
+      if (!finalDailyRate) {
+        setError('Mohon lengkapi Upah per Hari');
+        return;
+      }
+    }
+
+    if (!selectedWeekNum) {
+      setError('Mohon pilih Minggu Kerja. Jika belum ada, buat minggu baru terlebih dahulu.');
       return;
     }
-    const parsedRate = parseFloat(dailyRate.replace(/\D/g, ''));
+
+    const parsedRate = parseFloat(finalDailyRate.replace(/\D/g, ''));
     const parsedDays = parseInt(daysWorked);
+    const parsedWeekNum = parseInt(selectedWeekNum);
+
     if (isNaN(parsedRate) || parsedRate <= 0) {
       setError('Upah harian harus diisi berupa angka positif');
       return;
@@ -1109,13 +1214,22 @@ export const TambahPekerjaForm: React.FC<TambahPekerjaFormProps> = ({ onSubmit, 
       setError('Jumlah hari kerja harus berupa angka positif');
       return;
     }
+    if (isNaN(parsedWeekNum) || parsedWeekNum <= 0) {
+      setError('Minggu kerja tidak valid');
+      return;
+    }
 
     onSubmit({
-      name,
-      position,
+      name: finalName,
+      position: finalPosition,
       dailyRate: parsedRate,
       daysWorked: parsedDays,
-      status: 'BELUM_DIBAYAR'
+      status: paymentStatus,
+      weekNumber: parsedWeekNum,
+      weekStartDate: weekStartDate || undefined,
+      weekEndDate: weekEndDate || undefined,
+      masterWorkerId: finalMasterId,
+      notes: notes || `Penugasan Minggu ${parsedWeekNum}`
     });
   };
 
@@ -1126,35 +1240,207 @@ export const TambahPekerjaForm: React.FC<TambahPekerjaFormProps> = ({ onSubmit, 
     { value: 'Kenek (Adukan)', label: 'Kenek (Adukan)' },
     { value: 'Instalatur Listrik', label: 'Instalatur Listrik' },
     { value: 'Tukang Cat', label: 'Tukang Cat' },
+    { value: 'Mandor Lapangan', label: 'Mandor Lapangan' },
     { value: 'Lainnya', label: 'Lainnya' }
   ];
 
+  const paymentOptions = [
+    { value: 'BELUM_DIBAYAR', label: '🔴 Belum Dibayar' },
+    { value: 'SEBAGIAN', label: '🟡 Kasbon / Sebagian' },
+    { value: 'LUNAS', label: '🟢 Lunas Terbayar' }
+  ];
+
+  const masterWorkerOptions = [
+    { value: '', label: '-- Pilih Tukang dari Master --' },
+    ...masterWorkers.map(mw => ({
+      value: mw.id,
+      label: `${mw.name} (${mw.position} - Rp ${mw.dailyRate.toLocaleString('id-ID')}/hari)`
+    }))
+  ];
+
+  const weekOptions = weeksList.map((w: any) => ({
+    value: String(w.week_number),
+    label: `Minggu ${w.week_number} (${w.week_start || ''} s/d ${w.week_end || ''})`
+  }));
+
+  const nextWeekToCreate = weeksList.length > 0
+    ? Math.max(...weeksList.map((w: any) => w.week_number)) + 1
+    : 1;
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4 pr-1">
-      {error && <div className="p-3 bg-red-100 border border-red-400 text-red-700 text-xs font-bold rounded-xl">⚠️ {error}</div>}
+      {error && (
+        <div className="p-3 bg-red-100 border border-red-400 text-red-700 text-xs font-bold rounded-xl animate-fade-in">
+          ⚠️ {error}
+        </div>
+      )}
 
-      <Input label="Nama Lengkap Pekerja *" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Contoh: Budi Prasetyo" />
-      
-      <div className="grid grid-cols-2 gap-3">
-        <Select label="Posisi / Keahlian *" options={positions} value={position} onChange={(e) => setPosition(e.target.value)} />
-        <Input label="Hari Kerja Awal *" type="number" value={daysWorked} onChange={(e) => setDaysWorked(e.target.value)} placeholder="6" />
+      {/* Mode Selector */}
+      {masterWorkers.length > 0 && (
+        <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 border-2 border-[#0F172A] rounded-xl select-none">
+          <button
+            type="button"
+            onClick={() => {
+              setMode('SELECT_EXISTING');
+              setError(null);
+            }}
+            className={`py-1.5 text-xs font-extrabold rounded-lg transition-all cursor-pointer ${
+              mode === 'SELECT_EXISTING'
+                ? 'bg-[#0284C7] text-white shadow-neo-sm'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            👥 Pilih dari Master
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMode('CREATE_NEW');
+              setName('');
+              setDailyRate('');
+              setSelectedMasterId('');
+              setError(null);
+            }}
+            className={`py-1.5 text-xs font-extrabold rounded-lg transition-all cursor-pointer ${
+              mode === 'CREATE_NEW'
+                ? 'bg-[#0284C7] text-white shadow-neo-sm'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            ➕ Buat Tukang Baru
+          </button>
+        </div>
+      )}
+
+      {/* Field Group 1: Worker Information */}
+      <div className="space-y-3.5 pt-1">
+        {mode === 'SELECT_EXISTING' && masterWorkers.length > 0 ? (
+          <Select
+            label="Pilih Tukang dari Master *"
+            options={masterWorkerOptions}
+            value={selectedMasterId}
+            onChange={(e) => handleMasterChange(e.target.value)}
+          />
+        ) : (
+          <>
+            <Input
+              label="Nama Lengkap Pekerja Baru *"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Contoh: Budi Prasetyo"
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <Select
+                label="Posisi / Keahlian *"
+                options={positions}
+                value={position}
+                onChange={(e) => setPosition(e.target.value)}
+              />
+              <Input
+                label="Tarif per Hari (Rp) *"
+                type="text"
+                value={dailyRate}
+                onChange={(e) => {
+                  const raw = e.target.value.replace(/\D/g, '');
+                  setDailyRate(raw ? Number(raw).toLocaleString('id-ID') : '');
+                }}
+                prefixText="Rp"
+                placeholder="150.000"
+              />
+            </div>
+          </>
+        )}
       </div>
 
-      <Input
-        label="Upah per Hari (Rp) *"
-        type="text"
-        value={dailyRate}
-        onChange={(e) => {
-          const raw = e.target.value.replace(/\D/g, '');
-          setDailyRate(raw ? Number(raw).toLocaleString('id-ID') : '');
-        }}
-        prefixText="Rp"
-        placeholder="150.000"
-      />
+      {/* Field Group 2: Assignment & Sequential Week Selector */}
+      <div className="p-3.5 bg-slate-50 border-2 border-[#0F172A] rounded-xl space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-chunky text-[#0F172A] uppercase">📆 Penugasan Proyek & Minggu</span>
+          <button
+            type="button"
+            onClick={handleCreateNextWeek}
+            disabled={isCreatingWeek}
+            className="px-2 py-1 bg-purple-50 hover:bg-purple-100 border border-purple-800 text-purple-900 font-black text-[10px] uppercase rounded-lg transition-all cursor-pointer flex items-center gap-1 shrink-0"
+          >
+            {isCreatingWeek ? (
+              <>
+                <RefreshCw className="w-3 h-3 animate-spin" />
+                Proses...
+              </>
+            ) : (
+              `+ Buat Minggu ${nextWeekToCreate}`
+            )}
+          </button>
+        </div>
+
+        {weekOptions.length === 0 ? (
+          <div className="text-center py-4 bg-amber-50 border border-amber-300 rounded-lg p-2">
+            <p className="text-[10px] font-bold text-amber-800">
+              Belum ada Minggu Kerja. Silakan klik tombol "+ Buat Minggu 1" di atas.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3">
+            <Select
+              label="Pilih Minggu Kerja *"
+              options={weekOptions}
+              value={selectedWeekNum}
+              onChange={(e) => handleWeekChange(e.target.value)}
+            />
+          </div>
+        )}
+
+        {selectedWeekNum && (
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="Mulai Kerja"
+              type="date"
+              value={weekStartDate}
+              onChange={(e) => setWeekStartDate(e.target.value)}
+            />
+            <Input
+              label="Selesai Kerja"
+              type="date"
+              value={weekEndDate}
+              onChange={(e) => setWeekEndDate(e.target.value)}
+            />
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-3">
+          <Input
+            label="Jumlah Hari Kerja *"
+            type="number"
+            value={daysWorked}
+            onChange={(e) => setDaysWorked(e.target.value)}
+            placeholder="6"
+          />
+          <Select
+            label="Status Pembayaran *"
+            options={paymentOptions}
+            value={paymentStatus}
+            onChange={(e) => setPaymentStatus(e.target.value as any)}
+          />
+        </div>
+
+        {/* Notes (Keterangan) */}
+        <Input
+          label="Catatan Lapangan (Opsional)"
+          type="text"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Contoh: Lembur malam rabu, bonus transport"
+        />
+      </div>
 
       <div className="flex gap-3 pt-2 select-none">
-        <Button variant="ghost" type="button" className="flex-1" onClick={onCancel}>Batal</Button>
-        <Button variant="secondary" type="submit" className="flex-1">Tambah Tukang</Button>
+        <Button variant="ghost" type="button" className="flex-1" onClick={onCancel}>
+          Batal
+        </Button>
+        <Button variant="secondary" type="submit" className="flex-1">
+          Tugaskan Pekerja
+        </Button>
       </div>
     </form>
   );

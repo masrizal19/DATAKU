@@ -58,6 +58,63 @@ import { getCurrentProjectWeek, getProjectWeeks } from '../utils/datetime';
 import { IdentitySettingsSection } from '../components/IdentitySettingsSection';
 import { AppBrand } from '../components/AppBrand';
 
+const colorCachePages = new Map<string, string>();
+const getRgbaColorPages = (cssColor: string) => {
+  if (colorCachePages.has(cssColor)) return colorCachePages.get(cssColor)!;
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return cssColor;
+    ctx.fillStyle = cssColor;
+    ctx.fillRect(0, 0, 1, 1);
+    const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+    const rgbaStr = `rgba(${r}, ${g}, ${b}, ${a / 255})`;
+    colorCachePages.set(cssColor, rgbaStr);
+    return rgbaStr;
+  } catch (e) {
+    return cssColor;
+  }
+};
+
+const normalizeColorsOnClonePages = (originalNode: HTMLElement, cloneNode: HTMLElement) => {
+  const colorProps = [
+    'color',
+    'backgroundColor',
+    'borderTopColor',
+    'borderRightColor',
+    'borderBottomColor',
+    'borderLeftColor',
+    'outlineColor',
+    'textDecorationColor',
+    'fill',
+    'stroke'
+  ];
+  const originalElements = [originalNode, ...Array.from(originalNode.querySelectorAll<HTMLElement>('*'))];
+  const cloneElements = [cloneNode, ...Array.from(cloneNode.querySelectorAll<HTMLElement>('*'))];
+  for (let i = 0; i < originalElements.length; i++) {
+    const orig = originalElements[i];
+    const clone = cloneElements[i];
+    if (!orig || !clone) continue;
+    const compStyle = window.getComputedStyle(orig);
+    colorProps.forEach((prop) => {
+      const val = compStyle[prop as any];
+      if (val && (val.includes('oklab') || val.includes('color-mix') || val.includes('lab') || val.includes('lch') || val.includes('oklch'))) {
+        (clone.style as any)[prop] = getRgbaColorPages(val);
+      }
+    });
+    const boxShadow = compStyle.boxShadow;
+    if (boxShadow && (boxShadow.includes('oklab') || boxShadow.includes('color-mix') || boxShadow.includes('lab') || boxShadow.includes('lch') || boxShadow.includes('oklch'))) {
+      clone.style.boxShadow = 'none';
+    }
+    const bgImage = compStyle.backgroundImage;
+    if (bgImage && (bgImage.includes('oklab') || bgImage.includes('color-mix') || bgImage.includes('lab') || bgImage.includes('lch') || bgImage.includes('oklch'))) {
+      clone.style.backgroundImage = 'none';
+    }
+  }
+};
+
 /// --- VIEW 1: DASHBOARD VIEW ---
 interface DashboardViewProps {
   onQuickAction: (actionType: string) => void;
@@ -1406,7 +1463,7 @@ interface WorkersViewProps {
 }
 
 export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPayWorkerClick }) => {
-  const { state, updateWorker, deleteWorker, addWorker, masterWorkers, identityConfig } = useApp();
+  const { state, updateWorker, deleteWorker, addWorker, masterWorkers, identityConfig, addNextWeek } = useApp();
   const activeProj = state.projects.find(p => p.id === state.activeProjectId);
 
   // States for Payroll / Receipt Modal Details
@@ -1414,7 +1471,7 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
   const [editingWorker, setEditingWorker] = useState<Worker | null>(null);
   const [printSingleWorker, setPrintSingleWorker] = useState<Worker | null>(null);
   const [printAllWorkers, setPrintAllWorkers] = useState<boolean>(false);
-  const [selectedWeek, setSelectedWeek] = useState<number | 'all'>(2); // Default to current active week (Minggu 2)
+  const [selectedWeek, setSelectedWeek] = useState<number | 'all'>(1); // Default to current active week (Minggu 1)
   const [showMasterWorkerModal, setShowMasterWorkerModal] = useState<boolean>(false);
   const [editSaveError, setEditSaveError] = useState<string | null>(null);
   const [isUploadingDocument, setIsUploadingDocument] = useState<boolean>(false);
@@ -1434,13 +1491,43 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
     return <div className="text-center py-8">Pilih proyek aktif terlebih dahulu.</div>;
   }
 
-  const projectWeeks = getProjectWeeks(activeProj.startDate || '2026-09-01', 6);
+  // Dynamic projectWeeks mapped from DB
+  const projectWeeks = (state.projectWeeks && state.projectWeeks.length > 0)
+    ? state.projectWeeks.map((w: any) => {
+        let dateRange = 'Belum diatur';
+        if (w.week_start && w.week_end) {
+          const startD = new Date(w.week_start);
+          const endD = new Date(w.week_end);
+          if (!isNaN(startD.getTime()) && !isNaN(endD.getTime())) {
+            const sDay = startD.getDate();
+            const eDay = endD.getDate();
+            const shortMonth = new Intl.DateTimeFormat('id-ID', {
+              month: 'short'
+            }).format(endD);
+            dateRange = `${sDay}–${eDay} ${shortMonth}`;
+          }
+        }
+        
+        const todayStr = new Date().toISOString().substring(0, 10);
+        const isCurrent = w.week_start && w.week_end && (todayStr >= w.week_start && todayStr <= w.week_end);
+
+        return {
+          weekNumber: w.week_number,
+          startDate: w.week_start || '',
+          endDate: w.week_end || '',
+          label: `Minggu ${w.week_number}`,
+          dateRange,
+          isCurrent: !!isCurrent
+        };
+      })
+    : getProjectWeeks(activeProj.startDate || '2026-09-01', 1);
+
   const projWorkers = state.workers.filter(w => w.projectId === activeProj.id);
   
   // Filter workers based on selected week
   const filteredWorkers = projWorkers.filter(w => {
     if (selectedWeek === 'all') return true;
-    return (w.weekNumber === selectedWeek) || (!w.weekNumber && selectedWeek === 2);
+    return (w.weekNumber === selectedWeek) || (!w.weekNumber && selectedWeek === 1);
   });
 
   // Derive granular stats for payroll from filtered workers
@@ -1656,6 +1743,21 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
                 </button>
               );
             })}
+
+            {/* Sequential Week Adder Button */}
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await addNextWeek();
+                } catch (err) {
+                  // Error handled inside AppContext
+                }
+              }}
+              className="px-3 py-2 rounded-xl border-2 border-dashed border-purple-800 text-xs font-black whitespace-nowrap transition-all cursor-pointer bg-purple-50 hover:bg-purple-100 text-purple-950 shadow-neo-sm flex items-center gap-1.5 shrink-0"
+            >
+              ➕ Buat Minggu {projectWeeks.length > 0 ? Math.max(...projectWeeks.map(pw => pw.weekNumber)) + 1 : 1}
+            </button>
           </div>
         </div>
 
@@ -2200,15 +2302,59 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
                       for (let i = 0; i < pageElements.length; i++) {
                         const el = pageElements[i];
                         setSlipExportProgress(`Merender slip ${i + 1} dari ${pageElements.length}...`);
-                        const canvas = await html2canvas(el, {
-                          scale: 2.2,
+
+                        // Extract worker info for file naming
+                        const rawName = el.getAttribute('data-worker-name') || 'Tukang';
+                        const rawDate = el.getAttribute('data-payment-date') || new Date().toISOString();
+                        const cleanWorkerName = rawName.replace(/[^a-zA-Z0-9]/g, '-').replace(/--+/g, '-');
+                        let cleanDate = '';
+                        try {
+                          cleanDate = new Date(rawDate).toISOString().substring(0, 10);
+                        } catch (e) {
+                          cleanDate = new Date().toISOString().substring(0, 10);
+                        }
+
+                        // Target filename: DATAKU-Slip-Gaji-[Nama-Tukang]-[Tanggal].jpg (dan png)
+                        const fileName = `DATAKU-Slip-Gaji-${cleanWorkerName}-${cleanDate}.${ext}`;
+
+                        // Clone the element offscreen to prevent HMR and visible artifacts
+                        const exportClone = el.cloneNode(true) as HTMLElement;
+                        exportClone.style.position = 'absolute';
+                        exportClone.style.left = '-9999px';
+                        exportClone.style.top = '0';
+                        exportClone.style.width = el.offsetWidth ? `${el.offsetWidth}px` : '800px';
+                        el.parentNode?.insertBefore(exportClone, el.nextSibling);
+
+                        // Normalize all colors (translating oklch/color-mix/lab/lch to standard RGB via Canvas fallback)
+                        normalizeColorsOnClonePages(el, exportClone);
+
+                        const canvas = await html2canvas(exportClone, {
+                          scale: 3.0, // High quality, crystal clear, no cut-off
                           useCORS: true,
-                          backgroundColor: '#ffffff'
+                          allowTaint: false,
+                          backgroundColor: '#ffffff',
+                          logging: false,
+                          onclone: (clonedDoc) => {
+                            const styleTags = clonedDoc.querySelectorAll('style');
+                            styleTags.forEach(tag => {
+                              if (tag.textContent) {
+                                tag.textContent = tag.textContent
+                                  .replace(/oklch/g, 'rgba')
+                                  .replace(/oklab/g, 'rgba')
+                                  .replace(/color-mix/g, 'rgba')
+                                  .replace(/lab\(/g, 'rgba(')
+                                  .replace(/lch\(/g, 'rgba(');
+                              }
+                            });
+                          }
                         });
+
+                        exportClone.remove();
+
                         const dataUrl = canvas.toDataURL(mime, 0.95);
                         const blob = await (await fetch(dataUrl)).blob();
                         images.push({
-                          name: `DATAKU_${cleanProject}_SlipUpah_${String(i + 1).padStart(2, '0')}.${ext}`,
+                          name: fileName,
                           blob,
                           dataUrl
                         });
@@ -2230,7 +2376,7 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
                         const zipUrl = URL.createObjectURL(zipBlob);
                         const a = document.createElement('a');
                         a.href = zipUrl;
-                        a.download = `DATAKU_${cleanProject}_Semua_SlipUpah.zip`;
+                        a.download = `DATAKU_Semua_Slip_Gaji_${cleanProject}.zip`;
                         document.body.appendChild(a);
                         a.click();
                         document.body.removeChild(a);
@@ -2343,6 +2489,8 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
                       key={w.id}
                       className="bg-white border-2 border-dashed border-slate-400 p-8 text-black font-sans leading-relaxed shadow-md relative break-after-page page-break-container"
                       style={{ pageBreakAfter: 'always', marginBottom: '24px' }}
+                      data-worker-name={w.name}
+                      data-payment-date={w.paymentDate || new Date().toISOString()}
                     >
                       {/* Logo / Header banner */}
                       <div className="flex justify-between items-center border-b-2 border-black pb-4 mb-4 select-none">
@@ -2494,7 +2642,7 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
               <div>
                 <h4 className="font-chunky text-sm text-[#0F172A] uppercase">👥 DATABASE MASTER TUKANG</h4>
                 <p className="text-[10px] text-[#64748B] font-extrabold uppercase mt-0.5">
-                  Tugaskan tukang ke proyek untuk {selectedWeek === 'all' ? 'Minggu 2' : `Minggu ${selectedWeek}`}
+                  Tugaskan tukang ke proyek untuk {selectedWeek === 'all' ? 'Minggu 1' : `Minggu ${selectedWeek}`}
                 </p>
               </div>
               <button
@@ -2507,7 +2655,7 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
 
             <div className="p-4 bg-sky-50 border-b border-[#0F172A]/10 flex items-center justify-between text-xs">
               <span className="font-bold text-[#0F172A]">
-                🎯 Target Penugasan: <b className="text-sky-800 uppercase">{selectedWeek === 'all' ? 'Minggu 2' : `Minggu ${selectedWeek}`}</b>
+                🎯 Target Penugasan: <b className="text-sky-800 uppercase">{selectedWeek === 'all' ? 'Minggu 1' : `Minggu ${selectedWeek}`}</b>
               </span>
               <span className="text-[10px] text-[#64748B] font-extrabold">
                 {masterWorkers.length} Tukang Terdaftar di Master
@@ -2532,10 +2680,10 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
                 </div>
               ) : (
                 masterWorkers.map((mw) => {
-                  const targetW = selectedWeek === 'all' ? 2 : selectedWeek;
+                  const targetW = selectedWeek === 'all' ? 1 : selectedWeek;
                   const isAssigned = projWorkers.some(
                     pw => (pw.masterWorkerId === mw.id || pw.name.toLowerCase() === mw.name.toLowerCase()) && 
-                          ((pw.weekNumber === targetW) || (!pw.weekNumber && targetW === 2))
+                          ((pw.weekNumber === targetW) || (!pw.weekNumber && targetW === 1))
                   );
 
                   return (
