@@ -1271,10 +1271,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateTransactionsOrder = async (orderedItems: Transaction[]) => {
     // Update local state immediately for instant, responsive feedback (Optimistic UI)
-    setState(prev => ({
-      ...prev,
-      transactions: orderedItems.map((item, idx) => ({ ...item, displayOrder: idx + 1 }))
-    }));
+    // We only update the transactions that were actually reordered
+    setState(prev => {
+      const updatedMap = new Map(orderedItems.map((item, idx) => [item.id, { ...item, displayOrder: idx + 1 }]));
+      const newTransactions = prev.transactions.map(t => {
+        const updated = updatedMap.get(t.id);
+        return updated ? updated : t;
+      });
+      
+      return {
+        ...prev,
+        transactions: newTransactions
+      };
+    });
 
     if (isSupabaseConfigured) {
       try {
@@ -1283,7 +1292,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           display_order: idx + 1
         }));
         await transactionService.updateTransactionsOrder(payload);
-        // Silent reload
+        // Silent reload to ensure server-side consistency
         if (state.activeProjectId) {
           await loadTransactions(state.activeProjectId);
         }

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Card, Button, Badge } from '../components/Common';
 import { formatRupiah, formatTanggal } from '../utils/format';
@@ -20,7 +20,11 @@ import {
   Users,
   Wallet,
   RefreshCw,
-  CheckCircle2
+  CheckCircle2,
+  GripVertical,
+  Save,
+  XCircle,
+  Settings2
 } from 'lucide-react';
 import { Transaction, CurrentReportData } from '../types';
 import { buildCurrentReportData, exportReportToExcel, exportReportToCSV, ReportFilterOptions } from '../utils/rekapEngine';
@@ -29,7 +33,7 @@ import { getProjectWeeks, getJakartaDateString, getTransactionPeriodMetadata } f
 import { syncReportToGoogleSheets, loadGoogleSheetsConnection } from '../services/googleSheetsService';
 
 export const RekapView: React.FC = () => {
-  const { state } = useApp();
+  const { state, updateTransactionsOrder } = useApp();
   const activeProj = state.projects.find(p => p.id === state.activeProjectId);
 
   // Filters State
@@ -39,6 +43,13 @@ export const RekapView: React.FC = () => {
   const [endDate, setEndDate] = useState<string>('');
   const [kategoriFilter, setKategoriFilter] = useState<string>('Semua');
   const [searchTerm, setSearchTerm] = useState<string>('');
+
+  // Reorder State
+  const [isReorderMode, setIsReorderMode] = useState<boolean>(false);
+  const [localTxs, setLocalTxs] = useState<Transaction[]>([]);
+  const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
+  const [isSavingOrder, setIsSavingOrder] = useState<boolean>(false);
+  const [orderSavedNotification, setOrderSavedNotification] = useState<boolean>(false);
 
   // Modals & UI States
   const [showPreviewModal, setShowPreviewModal] = useState<boolean>(false);
@@ -69,7 +80,7 @@ export const RekapView: React.FC = () => {
   // Further filter transactions for on-screen list by Category & Search
   const filteredTxs = useMemo(() => {
     if (!currentReportData) return [];
-    return currentReportData.mutasiDana.filter(tx => {
+    const txs = currentReportData.mutasiDana.filter(tx => {
       // Category filter
       let matchCat = true;
       if (kategoriFilter !== 'Semua') {
@@ -97,6 +108,19 @@ export const RekapView: React.FC = () => {
       }
 
       return matchCat && matchSearch;
+    });
+
+    // Final sorting: Prioritize displayOrder as requested (Point 11)
+    return txs.sort((a, b) => {
+      const orderA = a.displayOrder || 0;
+      const orderB = b.displayOrder || 0;
+      if (orderA !== orderB) return orderA - orderB;
+      
+      const dateA = new Date(a.date).getTime();
+      const dateB = new Date(b.date).getTime();
+      if (dateA !== dateB) return dateA - dateB;
+      
+      return (a.id || '').localeCompare(b.id || '');
     });
   }, [currentReportData, kategoriFilter, searchTerm]);
 
@@ -160,20 +184,10 @@ export const RekapView: React.FC = () => {
     const groups: any = {};
     if (!activeProj) return groups;
 
-    // Pre-sort transactions to maintain display_order & exact time sequencing
-    const sorted = [...filteredTxs].sort((a, b) => {
-      const dayA = a.date.substring(0, 10);
-      const dayB = b.date.substring(0, 10);
-      if (dayA !== dayB) return dayA.localeCompare(dayB);
-      
-      const orderA = a.displayOrder || 0;
-      const orderB = b.displayOrder || 0;
-      if (orderA !== orderB) return orderA - orderB;
-      
-      return new Date(a.date).getTime() - new Date(b.date).getTime();
-    });
+    // Use localTxs if in reorder mode, otherwise filteredTxs
+    const sourceData = isReorderMode ? localTxs : filteredTxs;
 
-    sorted.forEach(tx => {
+    sourceData.forEach(tx => {
       const meta = getTransactionPeriodMetadata(tx.date);
       const year = tx.date.substring(0, 4);
       const month = meta.monthYear.replace(` ${year}`, '').toUpperCase();
@@ -192,7 +206,73 @@ export const RekapView: React.FC = () => {
     });
     
     return groups;
-  }, [filteredTxs, activeProj]);
+  }, [filteredTxs, localTxs, isReorderMode, activeProj]);
+
+  // Handle Drag & Drop
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedIdx(index);
+    // Visual feedback for drag
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', index.toString());
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = 'move';
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent, targetIdx: number) => {
+    e.preventDefault();
+    if (draggedIdx === null || draggedIdx === targetIdx) return;
+
+    const reordered = [...localTxs];
+    const [draggedItem] = reordered.splice(draggedIdx, 1);
+    reordered.splice(targetIdx, 0, draggedItem);
+
+    setLocalTxs(reordered);
+    setDraggedIdx(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIdx(null);
+  };
+
+  const moveTransaction = (index: number, direction: 'up' | 'down') => {
+    const targetIdx = direction === 'up' ? index - 1 : index + 1;
+    if (targetIdx < 0 || targetIdx >= localTxs.length) return;
+    const reordered = [...localTxs];
+    const [item] = reordered.splice(index, 1);
+    reordered.splice(targetIdx, 0, item);
+    setLocalTxs(reordered);
+  };
+
+  const handleSaveOrder = async () => {
+    setIsSavingOrder(true);
+    try {
+      await updateTransactionsOrder(localTxs);
+      setIsReorderMode(false);
+      setOrderSavedNotification(true);
+      setTimeout(() => setOrderSavedNotification(false), 5000);
+    } catch (err) {
+      console.error('Failed to save order:', err);
+      alert('Gagal menyimpan urutan transaksi.');
+    } finally {
+      setIsSavingOrder(false);
+    }
+  };
+
+  const toggleReorderMode = () => {
+    if (!isReorderMode) {
+      setLocalTxs([...filteredTxs]);
+      setIsReorderMode(true);
+    } else {
+      setIsReorderMode(false);
+    }
+  };
 
   if (!activeProj || !currentReportData) {
     return (
@@ -283,6 +363,13 @@ export const RekapView: React.FC = () => {
         <div className="p-3 bg-[#D1FAE5] border-2 border-[#0F172A] rounded-xl flex items-center gap-2 text-xs font-bold text-emerald-900 shadow-neo-sm animate-fade-in select-all">
           <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
           <span>{syncSuccessMessage}</span>
+        </div>
+      )}
+
+      {orderSavedNotification && (
+        <div className="p-3 bg-blue-50 border-2 border-[#0F172A] rounded-xl flex items-center gap-2 text-xs font-bold text-blue-900 shadow-neo-sm animate-fade-in">
+          <CheckCircle2 className="w-4 h-4 text-blue-700 shrink-0" />
+          <span>✓ Urutan transaksi berhasil disimpan.</span>
         </div>
       )}
 
@@ -539,29 +626,65 @@ export const RekapView: React.FC = () => {
           </div>
 
           {/* View Toggle Mode Selector */}
-          <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
-            <button
-              type="button"
-              onClick={() => setViewType('pohon')}
-              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer ${
-                viewType === 'pohon'
-                  ? 'bg-[#0F172A] text-white shadow-sm'
-                  : 'text-slate-500 hover:text-[#0F172A]'
-              }`}
-            >
-              🪵 Pohon Kelompok
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewType('tabel')}
-              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer ${
-                viewType === 'tabel'
-                  ? 'bg-[#0F172A] text-white shadow-sm'
-                  : 'text-slate-500 hover:text-[#0F172A]'
-              }`}
-            >
-              📋 Daftar Tabel
-            </button>
+          <div className="flex flex-wrap gap-2 items-center">
+            {isReorderMode ? (
+              <div className="flex gap-2 animate-fade-in">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={handleSaveOrder}
+                  disabled={isSavingOrder}
+                  className="bg-blue-600 hover:bg-blue-700 text-white shadow-neo-sm h-9"
+                >
+                  <Save className="w-4 h-4 mr-1.5" />
+                  {isSavingOrder ? 'Menyimpan...' : 'Simpan Urutan'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsReorderMode(false)}
+                  className="bg-white border-2 border-[#0F172A] text-red-600 hover:bg-red-50 shadow-neo-sm h-9"
+                >
+                  <XCircle className="w-4 h-4 mr-1.5" />
+                  Batal
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={toggleReorderMode}
+                className="bg-white border-2 border-[#0F172A] text-[#0F172A] hover:bg-slate-50 shadow-neo-sm h-9"
+              >
+                <Settings2 className="w-4 h-4 mr-1.5 text-blue-600" />
+                Atur Urutan
+              </Button>
+            )}
+
+            <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 h-9">
+              <button
+                type="button"
+                onClick={() => setViewType('pohon')}
+                className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer ${
+                  viewType === 'pohon'
+                    ? 'bg-[#0F172A] text-white shadow-sm'
+                    : 'text-slate-500 hover:text-[#0F172A]'
+                }`}
+              >
+                🪵 Pohon Kelompok
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewType('tabel')}
+                className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer ${
+                  viewType === 'tabel'
+                    ? 'bg-[#0F172A] text-white shadow-sm'
+                    : 'text-slate-500 hover:text-[#0F172A]'
+                }`}
+              >
+                📋 Daftar Tabel
+              </button>
+            </div>
           </div>
         </div>
 
@@ -592,33 +715,74 @@ export const RekapView: React.FC = () => {
                               <span>{dateLabel.toUpperCase()}</span>
                             </div>
                             <div className="space-y-2 ml-1 sm:ml-3">
-                              {groupedTransactions[year][month][week][dateLabel].map((tx: any) => (
-                                <div key={tx.id} className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center bg-white p-3 rounded-xl border border-slate-200 hover:border-[#0F172A] hover:bg-slate-50/50 transition-all gap-2 shadow-sm">
-                                  <div className="flex items-start sm:items-center gap-2.5">
-                                    <span className="text-[9px] font-black font-mono text-[#0284C7] bg-[#E0F2FE] border border-[#0284C7]/25 px-1.5 py-0.5 rounded shrink-0 self-start sm:self-center">
-                                      {tx.timeLabel.replace(' WIB', '')}
-                                    </span>
-                                    <span className={`px-1.5 py-0.5 rounded font-black text-[8px] border border-[#0f172a]/15 shrink-0 uppercase self-start sm:self-center ${
-                                      tx.type === 'DANA_MASUK' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-red-50 text-red-800 border-red-200'
-                                    }`}>
-                                      {tx.type === 'DANA_MASUK' ? 'DANA MASUK' : 'PENGELUARAN'}
-                                    </span>
-                                    <div className="min-w-0">
-                                      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                                        <span className="text-xs font-extrabold text-[#0F172A] uppercase truncate">{tx.sourceOrRecipient}</span>
-                                        <span className="text-slate-400 text-[10px] hidden sm:inline">•</span>
-                                        <span className="text-[10px] text-slate-500 font-bold bg-slate-100 px-1.5 py-0.5 rounded">{tx.category}</span>
+                              {groupedTransactions[year][month][week][dateLabel].map((tx: any, idx: number) => {
+                                // Find global index in source data for D&D logic
+                                const globalIdx = isReorderMode ? localTxs.findIndex(t => t.id === tx.id) : -1;
+                                const isDragged = draggedIdx === globalIdx;
+
+                                return (
+                                  <div 
+                                    key={tx.id} 
+                                    draggable={isReorderMode}
+                                    onDragStart={isReorderMode ? (e) => handleDragStart(e, globalIdx) : undefined}
+                                    onDragOver={isReorderMode ? (e) => handleDragOver(e, globalIdx) : undefined}
+                                    onDrop={isReorderMode ? (e) => handleDrop(e, globalIdx) : undefined}
+                                    onDragEnd={isReorderMode ? handleDragEnd : undefined}
+                                    className={`flex flex-col sm:flex-row justify-between items-stretch sm:items-center bg-white p-3 rounded-xl border border-slate-200 hover:border-[#0F172A] hover:bg-slate-50/50 transition-all gap-2 shadow-sm ${
+                                      isReorderMode ? 'cursor-move' : ''
+                                    } ${isDragged ? 'opacity-30 border-blue-500 scale-95' : ''}`}
+                                  >
+                                    <div className="flex items-start sm:items-center gap-2.5">
+                                      {isReorderMode && (
+                                        <div className="flex items-center gap-1.5 shrink-0">
+                                          <GripVertical className="w-4 h-4 text-slate-500 cursor-grab active:cursor-grabbing" />
+                                          <div className="flex flex-col gap-0.5">
+                                            <button
+                                              type="button"
+                                              onClick={(e) => { e.stopPropagation(); moveTransaction(globalIdx, 'up'); }}
+                                              disabled={globalIdx === 0}
+                                              className="w-5 h-5 bg-slate-100 hover:bg-slate-200 disabled:opacity-30 rounded text-[10px] font-bold flex items-center justify-center text-[#0F172A]"
+                                              title="Pindahkan ke atas"
+                                            >
+                                              ▲
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={(e) => { e.stopPropagation(); moveTransaction(globalIdx, 'down'); }}
+                                              disabled={globalIdx === localTxs.length - 1}
+                                              className="w-5 h-5 bg-slate-100 hover:bg-slate-200 disabled:opacity-30 rounded text-[10px] font-bold flex items-center justify-center text-[#0F172A]"
+                                              title="Pindahkan ke bawah"
+                                            >
+                                              ▼
+                                            </button>
+                                          </div>
+                                        </div>
+                                      )}
+                                      <span className="text-[9px] font-black font-mono text-[#0284C7] bg-[#E0F2FE] border border-[#0284C7]/25 px-1.5 py-0.5 rounded shrink-0 self-start sm:self-center">
+                                        {tx.timeLabel.replace(' WIB', '')}
+                                      </span>
+                                      <span className={`px-1.5 py-0.5 rounded font-black text-[8px] border border-[#0f172a]/15 shrink-0 uppercase self-start sm:self-center ${
+                                        tx.type === 'DANA_MASUK' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-red-50 text-red-800 border-red-200'
+                                      }`}>
+                                        {tx.type === 'DANA_MASUK' ? 'DANA MASUK' : 'PENGELUARAN'}
+                                      </span>
+                                      <div className="min-w-0">
+                                        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                                          <span className="text-xs font-extrabold text-[#0F172A] uppercase truncate">{tx.sourceOrRecipient}</span>
+                                          <span className="text-slate-400 text-[10px] hidden sm:inline">•</span>
+                                          <span className="text-[10px] text-slate-500 font-bold bg-slate-100 px-1.5 py-0.5 rounded">{tx.category}</span>
+                                        </div>
+                                        {tx.notes && <p className="text-[11px] text-[#64748B] italic font-semibold mt-1">"{tx.notes}"</p>}
                                       </div>
-                                      {tx.notes && <p className="text-[11px] text-[#64748B] italic font-semibold mt-1">"{tx.notes}"</p>}
                                     </div>
+                                    <span className={`font-chunky text-xs text-right whitespace-nowrap self-end sm:self-center ${
+                                      tx.type === 'DANA_MASUK' ? 'text-emerald-700' : 'text-red-600'
+                                    }`}>
+                                      {tx.type === 'DANA_MASUK' ? '+' : '-'} {formatRupiah(tx.amount)}
+                                    </span>
                                   </div>
-                                  <span className={`font-chunky text-xs text-right whitespace-nowrap self-end sm:self-center ${
-                                    tx.type === 'DANA_MASUK' ? 'text-emerald-700' : 'text-red-600'
-                                  }`}>
-                                    {tx.type === 'DANA_MASUK' ? '+' : '-'} {formatRupiah(tx.amount)}
-                                  </span>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           </div>
                         ))}
@@ -629,7 +793,7 @@ export const RekapView: React.FC = () => {
               </div>
             ))}
 
-            {filteredTxs.length === 0 && (
+            {((!isReorderMode && filteredTxs.length === 0) || (isReorderMode && localTxs.length === 0)) && (
               <div className="p-12 text-center text-slate-400 font-bold uppercase select-none">
                 Tidak ada data transaksi di periode ini.
               </div>
@@ -643,6 +807,7 @@ export const RekapView: React.FC = () => {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-[#F8FAFC] border-b-2 border-[#0F172A]/10 text-[10px] font-extrabold text-[#64748B] uppercase tracking-wider">
+                    {isReorderMode && <th className="p-3 w-8"></th>}
                     <th className="p-3">Tanggal</th>
                     <th className="p-3">Jenis</th>
                     <th className="p-3">Kategori</th>
@@ -653,35 +818,76 @@ export const RekapView: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#0F172A]/10 text-xs font-semibold">
-                  {filteredTxs.map((tx) => (
-                    <tr key={tx.id} className="hover:bg-[#FAF8FF] transition-colors">
-                      <td className="p-3 text-slate-600 whitespace-nowrap">{formatTanggal(tx.date)}</td>
-                      <td className="p-3">
-                        <span className={`px-2 py-0.5 rounded font-extrabold text-[9px] border border-[#0f172a]/15 ${
-                          tx.type === 'DANA_MASUK' ? 'bg-[#D1FAE5] text-emerald-800' : 'bg-[#FEE2E2] text-red-800'
+                  {(isReorderMode ? localTxs : filteredTxs).map((tx, idx) => {
+                    const isDragged = draggedIdx === idx;
+                    
+                    return (
+                      <tr 
+                        key={tx.id} 
+                        draggable={isReorderMode}
+                        onDragStart={isReorderMode ? (e) => handleDragStart(e, idx) : undefined}
+                        onDragOver={isReorderMode ? (e) => handleDragOver(e, idx) : undefined}
+                        onDrop={isReorderMode ? (e) => handleDrop(e, idx) : undefined}
+                        onDragEnd={isReorderMode ? handleDragEnd : undefined}
+                        className={`transition-colors ${
+                          isReorderMode ? 'cursor-move' : ''
+                        } ${isDragged ? 'opacity-30 bg-blue-50' : 'hover:bg-[#FAF8FF]'}`}
+                      >
+                        {isReorderMode && (
+                          <td className="p-3">
+                            <div className="flex items-center gap-1.5">
+                              <GripVertical className="w-4 h-4 text-slate-500 cursor-grab active:cursor-grabbing shrink-0" />
+                              <div className="flex flex-col gap-0.5">
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); moveTransaction(idx, 'up'); }}
+                                  disabled={idx === 0}
+                                  className="w-4 h-4 bg-slate-100 hover:bg-slate-200 disabled:opacity-30 rounded text-[9px] font-bold flex items-center justify-center text-[#0F172A]"
+                                  title="Pindahkan ke atas"
+                                >
+                                  ▲
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); moveTransaction(idx, 'down'); }}
+                                  disabled={idx === localTxs.length - 1}
+                                  className="w-4 h-4 bg-slate-100 hover:bg-slate-200 disabled:opacity-30 rounded text-[9px] font-bold flex items-center justify-center text-[#0F172A]"
+                                  title="Pindahkan ke bawah"
+                                >
+                                  ▼
+                                </button>
+                              </div>
+                            </div>
+                          </td>
+                        )}
+                        <td className="p-3 text-slate-600 whitespace-nowrap">{formatTanggal(tx.date)}</td>
+                        <td className="p-3">
+                          <span className={`px-2 py-0.5 rounded font-extrabold text-[9px] border border-[#0f172a]/15 ${
+                            tx.type === 'DANA_MASUK' ? 'bg-[#D1FAE5] text-emerald-800' : 'bg-[#FEE2E2] text-red-800'
+                          }`}>
+                            {tx.type}
+                          </span>
+                        </td>
+                        <td className="p-3 font-bold text-[#0F172A]">{tx.category}</td>
+                        <td className="p-3 text-[#475569] max-w-xs truncate italic">"{tx.notes || '-'}"</td>
+                        <td className="p-3 font-extrabold text-[#0F172A] uppercase">{tx.sourceOrRecipient}</td>
+                        <td className={`p-3 font-chunky text-right whitespace-nowrap ${
+                          tx.type === 'DANA_MASUK' ? 'text-emerald-600' : 'text-red-500'
                         }`}>
-                          {tx.type}
-                        </span>
-                      </td>
-                      <td className="p-3 font-bold text-[#0F172A]">{tx.category}</td>
-                      <td className="p-3 text-[#475569] max-w-xs truncate italic">"{tx.notes || '-'}"</td>
-                      <td className="p-3 font-extrabold text-[#0F172A] uppercase">{tx.sourceOrRecipient}</td>
-                      <td className={`p-3 font-chunky text-right whitespace-nowrap ${
-                        tx.type === 'DANA_MASUK' ? 'text-emerald-600' : 'text-red-500'
-                      }`}>
-                        {tx.type === 'DANA_MASUK' ? '+' : '-'} {formatRupiah(tx.amount)}
-                      </td>
-                      <td className="p-3 text-center">
-                        <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 font-extrabold text-[9px] rounded border border-emerald-300">
-                          {tx.status || 'Berhasil'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                          {tx.type === 'DANA_MASUK' ? '+' : '-'} {formatRupiah(tx.amount)}
+                        </td>
+                        <td className="p-3 text-center">
+                          <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 font-extrabold text-[9px] rounded border border-emerald-300">
+                            {tx.status || 'Berhasil'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
 
-                  {filteredTxs.length === 0 && (
+                  {((!isReorderMode && filteredTxs.length === 0) || (isReorderMode && localTxs.length === 0)) && (
                     <tr>
-                      <td colSpan={7} className="p-12 text-center text-slate-400 font-bold uppercase select-none">
+                      <td colSpan={isReorderMode ? 8 : 7} className="p-12 text-center text-slate-400 font-bold uppercase select-none">
                         Tidak ada transaksi yang cocok dengan filter Anda.
                       </td>
                     </tr>
@@ -692,32 +898,49 @@ export const RekapView: React.FC = () => {
 
             {/* Mobile Cards (Responsive Layout) */}
             <div className="block md:hidden divide-y divide-[#0F172A]/10 select-text">
-              {filteredTxs.map((tx) => (
-                <div key={tx.id} className="p-4 space-y-2 hover:bg-[#FAF8FF] transition-colors">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <p className="text-[10px] font-bold text-[#64748B]">{formatTanggal(tx.date)}</p>
-                      <p className="text-sm font-extrabold text-[#0F172A] uppercase mt-0.5">{tx.sourceOrRecipient}</p>
+              {(isReorderMode ? localTxs : filteredTxs).map((tx, idx) => {
+                const isDragged = draggedIdx === idx;
+
+                return (
+                  <div 
+                    key={tx.id} 
+                    draggable={isReorderMode}
+                    onDragStart={isReorderMode ? (e) => handleDragStart(e, idx) : undefined}
+                    onDragOver={isReorderMode ? (e) => handleDragOver(e, idx) : undefined}
+                    onDrop={isReorderMode ? (e) => handleDrop(e, idx) : undefined}
+                    onDragEnd={isReorderMode ? handleDragEnd : undefined}
+                    className={`p-4 space-y-2 transition-colors ${
+                      isReorderMode ? 'cursor-move' : ''
+                    } ${isDragged ? 'opacity-30 bg-blue-50 scale-95' : 'hover:bg-[#FAF8FF]'}`}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="flex gap-2 items-start">
+                        {isReorderMode && <GripVertical className="w-4 h-4 text-slate-300 mt-1" />}
+                        <div>
+                          <p className="text-[10px] font-bold text-[#64748B]">{formatTanggal(tx.date)}</p>
+                          <p className="text-sm font-extrabold text-[#0F172A] uppercase mt-0.5">{tx.sourceOrRecipient}</p>
+                        </div>
+                      </div>
+                      <span className={`font-chunky text-sm ${tx.type === 'DANA_MASUK' ? 'text-emerald-600' : 'text-red-500'}`}>
+                        {tx.type === 'DANA_MASUK' ? '+' : '-'} {formatRupiah(tx.amount)}
+                      </span>
                     </div>
-                    <span className={`font-chunky text-sm ${tx.type === 'DANA_MASUK' ? 'text-emerald-600' : 'text-red-500'}`}>
-                      {tx.type === 'DANA_MASUK' ? '+' : '-'} {formatRupiah(tx.amount)}
-                    </span>
+
+                    <div className="flex items-center gap-1.5">
+                      <span className={`px-1.5 py-0.5 rounded font-extrabold text-[9px] border border-[#0f172a]/15 ${
+                        tx.type === 'DANA_MASUK' ? 'bg-[#D1FAE5] text-emerald-800' : 'bg-[#FEE2E2] text-red-800'
+                      }`}>
+                        {tx.type}
+                      </span>
+                      <span className="text-xs font-bold text-[#475569]">{tx.category}</span>
+                    </div>
+
+                    <p className="text-xs font-medium text-[#475569] italic">"{tx.notes || 'Tidak ada keterangan.'}"</p>
                   </div>
+                );
+              })}
 
-                  <div className="flex items-center gap-1.5">
-                    <span className={`px-1.5 py-0.5 rounded font-extrabold text-[9px] border border-[#0f172a]/15 ${
-                      tx.type === 'DANA_MASUK' ? 'bg-[#D1FAE5] text-emerald-800' : 'bg-[#FEE2E2] text-red-800'
-                    }`}>
-                      {tx.type}
-                    </span>
-                    <span className="text-xs font-bold text-[#475569]">{tx.category}</span>
-                  </div>
-
-                  <p className="text-xs font-medium text-[#475569] italic">"{tx.notes || 'Tidak ada keterangan.'}"</p>
-                </div>
-              ))}
-
-              {filteredTxs.length === 0 && (
+              {((!isReorderMode && filteredTxs.length === 0) || (isReorderMode && localTxs.length === 0)) && (
                 <div className="p-12 text-center text-slate-400 font-bold uppercase select-none">
                   Tidak ada log transaksi pada filter ini.
                 </div>
