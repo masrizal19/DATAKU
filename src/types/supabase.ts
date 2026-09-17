@@ -47,6 +47,7 @@ export interface SupabaseTransaction {
   recipient: string;
   description: string;
   transaction_date: string;
+  transaction_time?: string;
   transaction_at?: string;
   reference_id?: string;
   display_order?: number;
@@ -78,6 +79,8 @@ export interface SupabaseMaterialTransaction {
   supplier?: string;
   purpose?: string;
   transaction_date: string;
+  transaction_time?: string;
+  transaction_at?: string;
   description: string;
   created_by?: string;
   created_at?: string;
@@ -105,6 +108,7 @@ export interface SupabaseWorkerPayment {
   deduction: number;
   total_amount: number;
   payment_date: string;
+  payment_at?: string;
   payment_method: string;
   status: 'unpaid' | 'partial' | 'paid';
   notes: string;
@@ -116,6 +120,8 @@ export interface SupabaseDailyReport {
   id: string;
   project_id: string;
   report_date: string;
+  report_time?: string;
+  report_at?: string;
   weather: string;
   worker_count: number;
   work_description: string;

@@ -362,11 +362,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [state.activeProjectId]);
 
-  // Load Projects directly from Supabase
   const loadProjects = useCallback(async () => {
     if (!isSupabaseConfigured) return;
     try {
-      // Use a functional state update to get current state without adding it to dependencies
+      console.log('[DATAKU] Loading projects...');
       let currentUser: any;
       let activeProjectId: string | null = null;
 
@@ -376,8 +375,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return prev;
       });
 
+      console.log('[DATAKU] Fetching mandor UUID for:', currentUser?.name);
       const mandorUuid = await getMandorUuid(currentUser?.name);
+      console.log('[DATAKU] Mandor UUID:', mandorUuid);
+      
+      console.log('[DATAKU] Fetching projects from projectService...');
       const data = await projectService.getProjects(mandorUuid);
+      console.log('[DATAKU] Projects fetched:', data?.length);
       const storedActiveId = localStorage.getItem(ACTIVE_PROJECT_KEY);
 
       const mapped = data.map(p => mapSupabaseProjectToProject(p, storedActiveId));

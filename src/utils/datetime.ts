@@ -90,9 +90,10 @@ export interface ProjectWeek {
 }
 
 /**
- * Menghasilkan daftar minggu proyek berdasarkan tanggal mulai proyek
+ * Menghasilkan daftar minggu proyek berdasarkan kalender bulanan (reset setiap bulan).
+ * Menghasilkan 4 minggu untuk setiap bulan sejak tanggal mulai proyek sampai beberapa bulan ke depan.
  */
-export function getProjectWeeks(startDateStr: string = '2026-09-01', totalWeeks: number = 6): ProjectWeek[] {
+export function getProjectWeeks(startDateStr: string = '2026-09-01', totalMonths: number = 3): ProjectWeek[] {
   const weeks: ProjectWeek[] = [];
   const todayStr = getJakartaDateString();
 
@@ -101,33 +102,47 @@ export function getProjectWeeks(startDateStr: string = '2026-09-01', totalWeeks:
     start = new Date('2026-09-01');
   }
 
-  for (let i = 1; i <= totalWeeks; i++) {
-    const weekStart = new Date(start);
-    weekStart.setDate(start.getDate() + (i - 1) * 7);
+  const startYear = start.getFullYear();
+  const startMonth = start.getMonth();
 
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekStart.getDate() + 6);
+  for (let m = 0; m < totalMonths; m++) {
+    const currentMonthDate = new Date(startYear, startMonth + m, 1);
+    const year = currentMonthDate.getFullYear();
+    const month = currentMonthDate.getMonth();
+    
+    const monthName = new Intl.DateTimeFormat('id-ID', { month: 'long' }).format(currentMonthDate);
 
-    const sStr = getJakartaDateString(weekStart);
-    const eStr = getJakartaDateString(weekEnd);
+    // Minggu 1: 1-7
+    // Minggu 2: 8-14
+    // Minggu 3: 15-21
+    // Minggu 4: 22-akhir
+    const ranges = [
+      { start: 1, end: 7, week: 1 },
+      { start: 8, end: 14, week: 2 },
+      { start: 15, end: 21, week: 3 },
+      { start: 22, end: new Date(year, month + 1, 0).getDate(), week: 4 }
+    ];
 
-    const sDay = weekStart.getDate();
-    const eDay = weekEnd.getDate();
-    const shortMonth = new Intl.DateTimeFormat('id-ID', {
-      timeZone: JAKARTA_TZ,
-      month: 'short'
-    }).format(weekEnd);
-    const dateRange = `${sDay}–${eDay} ${shortMonth}`;
-
-    const isCurrent = todayStr >= sStr && todayStr <= eStr;
-
-    weeks.push({
-      weekNumber: i,
-      startDate: sStr,
-      endDate: eStr,
-      label: `Minggu ${i}`,
-      dateRange,
-      isCurrent
+    ranges.forEach(range => {
+      const sDate = new Date(year, month, range.start);
+      const eDate = new Date(year, month, range.end);
+      
+      const sStr = getJakartaDateString(sDate);
+      const eStr = getJakartaDateString(eDate);
+      
+      const shortMonth = new Intl.DateTimeFormat('id-ID', { month: 'short' }).format(eDate);
+      const dateRange = `${range.start}–${range.end} ${shortMonth}`;
+      
+      const isCurrent = todayStr >= sStr && todayStr <= eStr;
+      
+      weeks.push({
+        weekNumber: range.week,
+        startDate: sStr,
+        endDate: eStr,
+        label: `Minggu ${range.week} (${monthName} ${year})`,
+        dateRange,
+        isCurrent
+      });
     });
   }
 
@@ -209,19 +224,18 @@ export function getTransactionPeriodMetadata(dateIsoStr: string) {
     year: 'numeric'
   }).format(d);
   
-  let timeLabel = '07:00 WIB';
-  if (dateIsoStr.includes('T')) {
-    const timePart = dateIsoStr.split('T')[1].substring(0, 5); // HH:MM
-    timeLabel = `${timePart} WIB`;
-  } else {
-    timeLabel = `${getJakartaTimeInputString(d)} WIB`;
-  }
+  const timeLabel = new Intl.DateTimeFormat('id-ID', {
+    timeZone: JAKARTA_TZ,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).format(d) + ' WIB';
   
   return {
     weekNumber: weekNum,
     monthYear: monthYearLabel,
     dateString: dateLabel,
-    timeString: timeLabel
+    timeString: timeLabel.replace('.', ':')
   };
 }
 

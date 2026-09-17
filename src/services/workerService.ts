@@ -39,6 +39,7 @@ export interface DatakuWorkerPayment {
   worker_id: string;
   amount: number;
   payment_date: string;
+  payment_at?: string;
   payment_method: string;
   notes?: string | null;
   receipt_attachment_id?: string | null;
@@ -404,6 +405,10 @@ export const workerService = {
       throw new Error('Supabase database tidak terkonfigurasi.');
     }
     const payload: any = { ...updates, updated_at: new Date().toISOString() };
+    if (updates.payment_date !== undefined) {
+      payload.payment_date = updates.payment_date.substring(0, 10);
+      payload.payment_at = updates.payment_date;
+    }
     delete payload.id;
     delete payload.created_at;
 
@@ -508,7 +513,7 @@ export function mapSupabaseToAppWorkers(
       dailyRate: dailyRate,
       totalWages: totalWages,
       status: status,
-      paymentDate: latestPayment?.payment_date,
+      paymentDate: latestPayment?.payment_at || latestPayment?.payment_date,
       paymentMethod: latestPayment?.payment_method || 'Kas Tunai',
       notes: ww.notes || undefined,
       weekNumber: weekNumber,

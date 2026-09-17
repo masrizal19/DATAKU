@@ -578,8 +578,9 @@ export const BarangMasukForm: React.FC<BarangMasukFormProps> = ({ onSubmit, onCa
 
       <div className="grid grid-cols-2 gap-3">
         <Input label="Tanggal Masuk *" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        <Select label="Kategori Material *" options={categories} value={category} onChange={(e) => setCategory(e.target.value as MaterialCategory)} />
+        <Input label="Jam *" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
       </div>
+      <Select label="Kategori Material *" options={categories} value={category} onChange={(e) => setCategory(e.target.value as MaterialCategory)} />
 
       <Input label="Nama Barang / Material *" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Contoh: Semen Portland Gresik 50kg" />
       
@@ -665,6 +666,7 @@ export const BarangKeluarForm: React.FC<BarangKeluarFormProps> = ({ materials, o
   const [error, setError] = useState<string | null>(null);
 
   const currentMaterial = materials.find(m => m.id === materialId);
+  const period = getTransactionPeriodMetadata(combineDateTime(date, time));
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -702,7 +704,24 @@ export const BarangKeluarForm: React.FC<BarangKeluarFormProps> = ({ materials, o
     <form onSubmit={handleSubmit} className="space-y-4 pr-1">
       {error && <div className="p-3 bg-red-100 border border-red-400 text-red-700 text-xs font-bold rounded-xl">⚠️ {error}</div>}
 
-      <Input label="Tanggal Pengeluaran Gudang *" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      {period && (
+        <div className="bg-[#F1F5F9] p-3 rounded-xl border-2 border-[#E2E8F0] space-y-1">
+          <p className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wider">
+            Informasi Periode (Otomatis):
+          </p>
+          <p className="text-xs font-bold text-[#0F172A]">
+            📅 Minggu {period.weekNumber} • {period.monthYear}
+          </p>
+          <p className="text-[10px] font-semibold text-[#475569]">
+            {period.dateString} • {period.timeString}
+          </p>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
+        <Input label="Tanggal Pengeluaran Gudang *" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <Input label="Jam *" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+      </div>
       
       {materialOptions.length > 0 ? (
         <Select label="Pilih Barang dari Gudang *" options={materialOptions} value={materialId} onChange={(e) => setMaterialId(e.target.value)} />
@@ -757,6 +776,7 @@ export const BarangTerpakaiForm: React.FC<BarangTerpakaiFormProps> = ({ material
   const [error, setError] = useState<string | null>(null);
 
   const currentMaterial = materials.find(m => m.id === materialId);
+  const period = getTransactionPeriodMetadata(combineDateTime(date, time));
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -794,7 +814,24 @@ export const BarangTerpakaiForm: React.FC<BarangTerpakaiFormProps> = ({ material
     <form onSubmit={handleSubmit} className="space-y-4 pr-1">
       {error && <div className="p-3 bg-red-100 border border-red-400 text-red-700 text-xs font-bold rounded-xl">⚠️ {error}</div>}
 
-      <Input label="Tanggal Pemakaian *" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      {period && (
+        <div className="bg-[#F1F5F9] p-3 rounded-xl border-2 border-[#E2E8F0] space-y-1">
+          <p className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wider">
+            Informasi Periode (Otomatis):
+          </p>
+          <p className="text-xs font-bold text-[#0F172A]">
+            📅 Minggu {period.weekNumber} • {period.monthYear}
+          </p>
+          <p className="text-[10px] font-semibold text-[#475569]">
+            {period.dateString} • {period.timeString}
+          </p>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
+        <Input label="Tanggal Pemakaian *" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <Input label="Jam *" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+      </div>
       
       {materialOptions.length > 0 ? (
         <Select label="Pilih Material Terpakai *" options={materialOptions} value={materialId} onChange={(e) => setMaterialId(e.target.value)} />
@@ -847,6 +884,8 @@ export const PengeluaranForm: React.FC<PengeluaranFormProps> = ({ onSubmit, onCa
   const [photos, setPhotos] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  const period = getTransactionPeriodMetadata(combineDateTime(date, time));
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!amount || !recipient) {
@@ -885,7 +924,24 @@ export const PengeluaranForm: React.FC<PengeluaranFormProps> = ({ onSubmit, onCa
     <form onSubmit={handleSubmit} className="space-y-4 pr-1">
       {error && <div className="p-3 bg-red-100 border border-red-400 text-red-700 text-xs font-bold rounded-xl">⚠️ {error}</div>}
 
-      <Input label="Tanggal Pengeluaran *" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      {period && (
+        <div className="bg-[#F1F5F9] p-3 rounded-xl border-2 border-[#E2E8F0] space-y-1">
+          <p className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wider">
+            Informasi Periode (Otomatis):
+          </p>
+          <p className="text-xs font-bold text-[#0F172A]">
+            📅 Minggu {period.weekNumber} • {period.monthYear}
+          </p>
+          <p className="text-[10px] font-semibold text-[#475569]">
+            {period.dateString} • {period.timeString}
+          </p>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
+        <Input label="Tanggal Pengeluaran *" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <Input label="Jam *" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+      </div>
       
       <Input
         label="Nominal Pengeluaran (Rp) *"
@@ -1058,7 +1114,8 @@ interface LaporanFormProps {
 }
 
 export const LaporanForm: React.FC<LaporanFormProps> = ({ onSubmit, onCancel }) => {
-  const [date, setDate] = useState(new Date().toISOString().substring(0, 10));
+  const [date, setDate] = useState(getJakartaDateString());
+  const [time, setTime] = useState(getJakartaTimeInputString());
   const [weather, setWeather] = useState('Cerah');
   const [workers, setWorkers] = useState('8');
   const [workDone, setWorkDone] = useState('');
@@ -1068,6 +1125,8 @@ export const LaporanForm: React.FC<LaporanFormProps> = ({ onSubmit, onCancel }) 
   const [notes, setNotes] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  const period = getTransactionPeriodMetadata(combineDateTime(date, time));
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1082,7 +1141,7 @@ export const LaporanForm: React.FC<LaporanFormProps> = ({ onSubmit, onCancel }) 
     }
 
     onSubmit({
-      date,
+      date: combineDateTime(date, time),
       weather,
       workerCount: parsedWorkers,
       todayWork: workDone,
@@ -1098,20 +1157,35 @@ export const LaporanForm: React.FC<LaporanFormProps> = ({ onSubmit, onCancel }) 
     <form onSubmit={handleSubmit} className="space-y-4 pr-1">
       {error && <div className="p-3 bg-red-100 border border-red-400 text-red-700 text-xs font-bold rounded-xl">⚠️ {error}</div>}
 
+      {period && (
+        <div className="bg-[#F1F5F9] p-3 rounded-xl border-2 border-[#E2E8F0] space-y-1">
+          <p className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wider">
+            Informasi Periode (Otomatis):
+          </p>
+          <p className="text-xs font-bold text-[#0F172A]">
+            📅 Minggu {period.weekNumber} • {period.monthYear}
+          </p>
+          <p className="text-[10px] font-semibold text-[#475569]">
+            {period.dateString} • {period.timeString}
+          </p>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-3">
         <Input label="Tanggal Laporan *" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        <Select
-          label="Cuaca Harian *"
-          options={[
-            { value: 'Cerah', label: '☀️ Cerah' },
-            { value: 'Hujan Rintik', label: '🌧️ Hujan Rintik' },
-            { value: 'Hujan Lebat', label: '⛈️ Hujan Lebat' },
-            { value: 'Mendung', label: '☁️ Mendung' }
-          ]}
-          value={weather}
-          onChange={(e) => setWeather(e.target.value)}
-        />
+        <Input label="Jam *" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
       </div>
+      <Select
+        label="Cuaca Harian *"
+        options={[
+          { value: 'Cerah', label: '☀️ Cerah' },
+          { value: 'Hujan Rintik', label: '🌧️ Hujan Rintik' },
+          { value: 'Hujan Lebat', label: '⛈️ Hujan Lebat' },
+          { value: 'Mendung', label: '☁️ Mendung' }
+        ]}
+        value={weather}
+        onChange={(e) => setWeather(e.target.value)}
+      />
 
       <Input label="Jumlah Pekerja Aktif (Tukang/Kenek) *" type="number" value={workers} onChange={(e) => setWorkers(e.target.value)} placeholder="Contoh: 8" />
 

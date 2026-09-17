@@ -40,7 +40,9 @@ export const reportService = {
     }
     const insertData: Record<string, any> = {
       project_id: report.project_id.trim(),
-      report_date: report.report_date || new Date().toISOString().substring(0, 10),
+      report_date: report.report_date ? report.report_date.substring(0, 10) : new Date().toISOString().substring(0, 10),
+      report_time: report.report_date && report.report_date.includes('T') ? report.report_date.split('T')[1].substring(0, 8) : '07:00:00',
+      report_at: report.report_date || new Date().toISOString(),
       weather: report.weather || 'Cerah',
       worker_count: Number(report.worker_count) || 0,
       work_description: report.work_description || '',
@@ -71,7 +73,7 @@ export function mapSupabaseDailyReportToApp(sdr: SupabaseDailyReport): DailyRepo
   return {
     id: sdr.id,
     projectId: sdr.project_id,
-    date: sdr.report_date || sdr.created_at || new Date().toISOString().substring(0, 10),
+    date: sdr.report_at || (sdr.report_date && sdr.report_time ? `${sdr.report_date}T${sdr.report_time}+07:00` : sdr.report_date) || sdr.created_at || new Date().toISOString(),
     weather: sdr.weather || 'Cerah',
     workerCount: Number(sdr.worker_count) || 0,
     todayWork: sdr.work_description || '',

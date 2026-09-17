@@ -145,6 +145,7 @@ export const transactionService = {
       recipient: tx.recipient || '',
       description: tx.description || '',
       transaction_date: tx.transaction_date ? tx.transaction_date.substring(0, 10) : new Date().toISOString().substring(0, 10),
+      transaction_time: tx.transaction_date && tx.transaction_date.includes('T') ? tx.transaction_date.split('T')[1].substring(0, 8) : '07:00:00',
       transaction_at: tx.transaction_date || new Date().toISOString(),
       display_order: displayOrder,
       updated_at: new Date().toISOString()
@@ -233,10 +234,15 @@ export const transactionService = {
     if (updates.transaction_date !== undefined) {
       updateData.transaction_date = updates.transaction_date.substring(0, 10);
       updateData.transaction_at = updates.transaction_date;
+      if (updates.transaction_date.includes('T')) {
+        updateData.transaction_time = updates.transaction_date.split('T')[1].substring(0, 8);
+      }
     }
     const txType = updates.transaction_type || updates.type;
     if (txType !== undefined) updateData.transaction_type = txType;
     if (updates.display_order !== undefined) updateData.display_order = updates.display_order;
+    // Ensure we are saving updated_at explicitly
+    updateData.updated_at = new Date().toISOString();
 
     try {
       const { data, error } = await supabase
@@ -318,7 +324,7 @@ export function mapSupabaseTransactionToApp(st: SupabaseTransaction): Transactio
     id: st.id,
     projectId: st.project_id,
     type: type,
-    date: (st as any).transaction_at || st.transaction_date || st.created_at || new Date().toISOString(),
+    date: st.transaction_at || (st.transaction_date && st.transaction_time ? `${st.transaction_date}T${st.transaction_time}+07:00` : st.transaction_date) || st.created_at || new Date().toISOString(),
     amount: Number(st.amount) || 0,
     category: st.category || (type === 'DANA_MASUK' ? 'Dana Masuk' : type === 'UPAH_TUKANG' ? 'Upah Tukang' : 'Pengeluaran'),
     sourceOrRecipient: st.recipient || 'Lainnya',

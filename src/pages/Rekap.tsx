@@ -34,7 +34,7 @@ export const RekapView: React.FC = () => {
 
   // Filters State
   const [filterMode, setFilterMode] = useState<'semua' | 'hari' | 'minggu' | 'minggu_ini' | 'bulan' | 'tahun' | 'project_week' | 'custom'>('bulan');
-  const [selectedWeekNum, setSelectedWeekNum] = useState<number>(2); // Default ke Minggu 2
+  const [selectedWeekStartDate, setSelectedWeekStartDate] = useState<string>('');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
   const [kategoriFilter, setKategoriFilter] = useState<string>('Semua');
@@ -54,11 +54,11 @@ export const RekapView: React.FC = () => {
   const filterOptions: ReportFilterOptions = useMemo(() => {
     return {
       periode: filterMode,
-      weekNumber: selectedWeekNum,
+      weekStartDate: selectedWeekStartDate || undefined,
       startDate: startDate || undefined,
       endDate: endDate || undefined
     };
-  }, [filterMode, selectedWeekNum, startDate, endDate]);
+  }, [filterMode, selectedWeekStartDate, startDate, endDate]);
 
   // SINGLE SOURCE OF TRUTH: currentReportData
   const currentReportData: CurrentReportData | null = useMemo(() => {
@@ -111,7 +111,7 @@ export const RekapView: React.FC = () => {
     
     let dateRangeStr = '';
     if (filterMode === 'project_week') {
-      const selectedWeek = projectWeeks.find(pw => pw.weekNumber === selectedWeekNum);
+      const selectedWeek = projectWeeks.find(pw => pw.startDate === selectedWeekStartDate);
       if (selectedWeek) {
         try {
           const s = new Date(selectedWeek.startDate + 'T12:00:00');
@@ -145,7 +145,15 @@ export const RekapView: React.FC = () => {
       minggu: `MINGGU ${meta.weekNumber}`,
       periode: dateRangeStr.toUpperCase()
     };
-  }, [activeProj, filterMode, selectedWeekNum, startDate, projectWeeks, currentReportData]);
+  }, [activeProj, filterMode, selectedWeekStartDate, startDate, projectWeeks, currentReportData]);
+
+  // Initialize selectedWeekStartDate
+  React.useEffect(() => {
+    if (projectWeeks.length > 0 && !selectedWeekStartDate) {
+      const current = projectWeeks.find(w => w.isCurrent) || projectWeeks[0];
+      setSelectedWeekStartDate(current.startDate);
+    }
+  }, [projectWeeks, selectedWeekStartDate]);
 
   // Hierarchically group filtered transactions into Year -> Month -> Week -> Date structure
   const groupedTransactions = useMemo(() => {
@@ -327,7 +335,7 @@ export const RekapView: React.FC = () => {
           <div className="flex-1 space-y-1">
             <span className="text-[9px] font-extrabold text-[#64748B] uppercase block">Minggu Proyek</span>
             <div className="text-xs font-black text-amber-600 uppercase tracking-wide">
-              {filterMode === 'project_week' ? `MINGGU ${selectedWeekNum}` : activePeriodMeta.minggu}
+              {filterMode === 'project_week' ? `MINGGU ${currentReportData.period.weekNumber}` : activePeriodMeta.minggu}
             </div>
           </div>
           <div className="w-px bg-[#0F172A]/10 hidden md:block"></div>
@@ -372,12 +380,13 @@ export const RekapView: React.FC = () => {
               </label>
               <div className="relative">
                 <select
-                  value={selectedWeekNum}
-                  onChange={(e) => setSelectedWeekNum(Number(e.target.value))}
+                  value={selectedWeekStartDate}
+                  onChange={(e) => setSelectedWeekStartDate(e.target.value)}
                   className="w-full bg-white border-2 border-[#0F172A] rounded-xl px-3.5 py-2 text-xs font-bold text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#0284C7] shadow-neo-sm appearance-none cursor-pointer"
                 >
+                  <option value="">-- Pilih Minggu --</option>
                   {projectWeeks.map((pw) => (
-                    <option key={pw.weekNumber} value={pw.weekNumber}>
+                    <option key={pw.startDate} value={pw.startDate}>
                       {pw.label}
                     </option>
                   ))}

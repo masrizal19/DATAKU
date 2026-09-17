@@ -11,6 +11,7 @@ import { formatRupiah, formatTanggal } from './format';
 export interface ReportFilterOptions {
   periode: 'semua' | 'hari' | 'minggu' | 'minggu_ini' | 'bulan' | 'tahun' | 'custom' | 'project_week';
   weekNumber?: number;
+  weekStartDate?: string;
   startDate?: string;
   endDate?: string;
 }
@@ -94,11 +95,15 @@ export function buildCurrentReportData(
       break;
     }
     case 'project_week': {
-      weekNum = options.weekNumber || 1;
-      const selectedWeek = weeks.find(w => w.weekNumber === weekNum) || weeks[0];
-      dateStart = selectedWeek.startDate;
-      dateEnd = selectedWeek.endDate;
-      periodLabel = `${selectedWeek.label.toUpperCase()} (${formatTanggal(dateStart)} s/d ${formatTanggal(dateEnd)})`;
+      const selectedWeek = options.weekStartDate 
+        ? weeks.find(w => w.startDate === options.weekStartDate) 
+        : (options.weekNumber ? weeks.find(w => w.weekNumber === options.weekNumber) : weeks[0]);
+      
+      const finalWeek = selectedWeek || weeks[0];
+      weekNum = finalWeek.weekNumber;
+      dateStart = finalWeek.startDate;
+      dateEnd = finalWeek.endDate;
+      periodLabel = `${finalWeek.label.toUpperCase()} (${formatTanggal(dateStart)} s/d ${formatTanggal(dateEnd)})`;
       break;
     }
     case 'custom': {

@@ -142,6 +142,7 @@ export const materialService = {
       supplier: log.supplier || '',
       purpose: log.purpose || '',
       transaction_date: log.transaction_date ? log.transaction_date.substring(0, 10) : new Date().toISOString().substring(0, 10),
+      transaction_time: log.transaction_date && log.transaction_date.includes('T') ? log.transaction_date.split('T')[1].substring(0, 8) : '07:00:00',
       transaction_at: log.transaction_date || new Date().toISOString(),
       description: log.description || ''
     };
@@ -184,7 +185,13 @@ export const materialService = {
     if (updates.unit_price !== undefined) payload.unit_price = Number(updates.unit_price) || 0;
     if (updates.supplier !== undefined) payload.supplier = updates.supplier;
     if (updates.purpose !== undefined) payload.purpose = updates.purpose;
-    if (updates.transaction_date !== undefined) payload.transaction_date = updates.transaction_date;
+    if (updates.transaction_date !== undefined) {
+      payload.transaction_date = updates.transaction_date.substring(0, 10);
+      payload.transaction_at = updates.transaction_date;
+      if (updates.transaction_date.includes('T')) {
+        payload.transaction_time = updates.transaction_date.split('T')[1].substring(0, 8);
+      }
+    }
     if (updates.description !== undefined) payload.description = updates.description;
     if (updates.transaction_type !== undefined) payload.transaction_type = updates.transaction_type;
 
@@ -258,7 +265,7 @@ export function mapSupabaseMaterialLogToApp(smt: SupabaseMaterialTransaction, ma
     type: type,
     materialId: smt.material_id,
     materialName: matName,
-    date: (smt as any).transaction_at || smt.transaction_date || smt.created_at || new Date().toISOString(),
+    date: smt.transaction_at || (smt.transaction_date && smt.transaction_time ? `${smt.transaction_date}T${smt.transaction_time}+07:00` : smt.transaction_date) || smt.created_at || new Date().toISOString(),
     amount: qty,
     unit: matUnit,
     pricePerUnit: price,
