@@ -14,10 +14,10 @@ export const transactionService = {
     }
 
     try {
-      // 1. Prioritas sorting: display_order ASC, created_at ASC, id ASC as fallback
+      // 1. Prioritas sorting: display_order ASC, transaction_at ASC, id ASC as fallback
       const { data, error } = await query
         .order('display_order', { ascending: true, nullsFirst: false })
-        .order('created_at', { ascending: true })
+        .order('transaction_at', { ascending: true })
         .order('id', { ascending: true });
 
       if (error) {
@@ -42,7 +42,7 @@ export const transactionService = {
         const needMigration = data.some(t => t.display_order === null || t.display_order === 0);
         if (needMigration) {
           console.log(`Migrating display_order sequentially for project ${projectId}...`);
-          // Urutkan berdasarkan created_at ASC, kemudian id ASC
+          // Urutkan berdasarkan transaction_at ASC, kemudian id ASC
           const sortedForMigration = [...data].sort((a, b) => {
             const dateA = new Date(a.transaction_at || a.transaction_date || a.created_at || 0).getTime();
             const dateB = new Date(b.transaction_at || b.transaction_date || b.created_at || 0).getTime();
@@ -84,7 +84,7 @@ export const transactionService = {
       if (projectId && isUuidFormat(projectId)) {
         safeQuery.eq('project_id', String(projectId));
       }
-      const { data, error } = await safeQuery.order('created_at', { ascending: true });
+      const { data, error } = await safeQuery.order('transaction_at', { ascending: true });
       if (error) throw error;
       return data || [];
     }

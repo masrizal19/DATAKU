@@ -8,7 +8,7 @@ import { Button, Input, TextArea, Select } from './Common';
 import { Camera, Image, Check, Trash2, Sliders, DollarSign, Calendar, MapPin, Hammer, CloudSun, RefreshCw } from 'lucide-react';
 import { MaterialCategory } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { getJakartaDateString, getJakartaTimeInputString, combineDateTime } from '../utils/datetime';
+import { getJakartaDateString, getJakartaTimeInputString, combineDateTime, getTransactionPeriodMetadata } from '../utils/datetime';
 import { useApp } from '../context/AppContext';
 
 // Mock high quality construction photo assets for simulation
@@ -356,6 +356,9 @@ interface DanaMasukFormProps {
 }
 
 export const DanaMasukForm: React.FC<DanaMasukFormProps> = ({ onSubmit, onCancel }) => {
+  const { state } = useApp();
+  const activeProj = state.projects.find(p => p.id === state.activeProjectId);
+
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('Pembayaran Termin');
   const [source, setSource] = useState('Transfer Pemilik');
@@ -365,6 +368,8 @@ export const DanaMasukForm: React.FC<DanaMasukFormProps> = ({ onSubmit, onCancel
   const [date, setDate] = useState(getJakartaDateString());
   const [time, setTime] = useState(getJakartaTimeInputString());
   const [error, setError] = useState<string | null>(null);
+
+  const period = getTransactionPeriodMetadata(combineDateTime(date, time));
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -380,7 +385,7 @@ export const DanaMasukForm: React.FC<DanaMasukFormProps> = ({ onSubmit, onCancel
       paymentMethod: method,
       notes,
       photos,
-      date
+      date: combineDateTime(date, time) // Send combined date time
     });
   };
 
@@ -397,6 +402,20 @@ export const DanaMasukForm: React.FC<DanaMasukFormProps> = ({ onSubmit, onCancel
   return (
     <form onSubmit={handleSubmit} className="space-y-4 pr-1">
       {error && <div className="p-3 bg-red-100 border border-red-400 text-red-700 text-xs font-bold rounded-xl">⚠️ {error}</div>}
+
+      {period && (
+        <div className="bg-[#F1F5F9] p-3 rounded-xl border-2 border-[#E2E8F0] space-y-1">
+          <p className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wider">
+            Informasi Periode (Otomatis):
+          </p>
+          <p className="text-xs font-bold text-[#0F172A]">
+            📅 Minggu {period.weekNumber} • {period.monthYear}
+          </p>
+          <p className="text-[10px] font-semibold text-[#475569]">
+            {period.dateString} • {period.timeString}
+          </p>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         <Input label="Tanggal *" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -477,6 +496,9 @@ interface BarangMasukFormProps {
 }
 
 export const BarangMasukForm: React.FC<BarangMasukFormProps> = ({ onSubmit, onCancel }) => {
+  const { state } = useApp();
+  const activeProj = state.projects.find(p => p.id === state.activeProjectId);
+
   const [name, setName] = useState('');
   const [category, setCategory] = useState<MaterialCategory>('Semen');
   const [amount, setAmount] = useState('');
@@ -489,6 +511,8 @@ export const BarangMasukForm: React.FC<BarangMasukFormProps> = ({ onSubmit, onCa
   const [photos, setPhotos] = useState<string[]>([]);
   const [payWithProjectFunds, setPayWithProjectFunds] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const period = getTransactionPeriodMetadata(combineDateTime(date, time));
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -537,6 +561,20 @@ export const BarangMasukForm: React.FC<BarangMasukFormProps> = ({ onSubmit, onCa
   return (
     <form onSubmit={handleSubmit} className="space-y-4 pr-1">
       {error && <div className="p-3 bg-red-100 border border-red-400 text-red-700 text-xs font-bold rounded-xl">⚠️ {error}</div>}
+
+      {period && (
+        <div className="bg-[#F1F5F9] p-3 rounded-xl border-2 border-[#E2E8F0] space-y-1">
+          <p className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wider">
+            Informasi Periode (Otomatis):
+          </p>
+          <p className="text-xs font-bold text-[#0F172A]">
+            📅 Minggu {period.weekNumber} • {period.monthYear}
+          </p>
+          <p className="text-[10px] font-semibold text-[#475569]">
+            {period.dateString} • {period.timeString}
+          </p>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         <Input label="Tanggal Masuk *" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -904,6 +942,9 @@ interface UpahFormProps {
 }
 
 export const UpahForm: React.FC<UpahFormProps> = ({ workers, onSubmit, onCancel }) => {
+  const { state } = useApp();
+  const activeProj = state.projects.find(p => p.id === state.activeProjectId);
+
   const unpaidWorkers = workers.filter(w => w.status !== 'LUNAS');
   const [workerId, setWorkerId] = useState(unpaidWorkers[0]?.id || '');
   const [amount, setAmount] = useState('');
@@ -911,6 +952,8 @@ export const UpahForm: React.FC<UpahFormProps> = ({ workers, onSubmit, onCancel 
   const [error, setError] = useState<string | null>(null);
   const [date, setDate] = useState(getJakartaDateString());
   const [time, setTime] = useState(getJakartaTimeInputString());
+
+  const period = getTransactionPeriodMetadata(combineDateTime(date, time));
 
   const currentWorker = workers.find(w => w.id === workerId);
 
@@ -937,6 +980,25 @@ export const UpahForm: React.FC<UpahFormProps> = ({ workers, onSubmit, onCancel 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 pr-1">
       {error && <div className="p-3 bg-red-100 border border-red-400 text-red-700 text-xs font-bold rounded-xl">⚠️ {error}</div>}
+
+      {period && (
+        <div className="bg-[#F1F5F9] p-3 rounded-xl border-2 border-[#E2E8F0] space-y-1">
+          <p className="text-[10px] font-extrabold text-[#64748B] uppercase tracking-wider">
+            Informasi Periode (Otomatis):
+          </p>
+          <p className="text-xs font-bold text-[#0F172A]">
+            📅 Minggu {period.weekNumber} • {period.monthYear}
+          </p>
+          <p className="text-[10px] font-semibold text-[#475569]">
+            {period.dateString} • {period.timeString}
+          </p>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
+        <Input label="Tanggal *" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <Input label="Jam *" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+      </div>
 
       {workerOptions.length > 0 ? (
         <Select label="Pilih Tukang / Pekerja *" options={workerOptions} value={workerId} onChange={(e) => setWorkerId(e.target.value)} />

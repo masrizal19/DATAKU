@@ -107,7 +107,7 @@ export const RekapView: React.FC = () => {
   const activePeriodMeta = useMemo(() => {
     if (!activeProj) return null;
     const targetDate = startDate || getJakartaDateString();
-    const meta = getTransactionPeriodMetadata(targetDate, activeProj.startDate || '2026-09-01');
+    const meta = getTransactionPeriodMetadata(targetDate);
     
     let dateRangeStr = '';
     if (filterMode === 'project_week') {
@@ -166,7 +166,7 @@ export const RekapView: React.FC = () => {
     });
 
     sorted.forEach(tx => {
-      const meta = getTransactionPeriodMetadata(tx.date, activeProj.startDate || '2026-09-01');
+      const meta = getTransactionPeriodMetadata(tx.date);
       const year = tx.date.substring(0, 4);
       const month = meta.monthYear.replace(` ${year}`, '').toUpperCase();
       const week = `MINGGU ${meta.weekNumber}`;

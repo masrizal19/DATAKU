@@ -172,76 +172,49 @@ export function combineDateTime(dateStr: string, timeStr: string): string {
 }
 
 /**
- * Menghitung nomor minggu proyek secara otomatis berdasarkan tanggal transaksi dan tanggal mulai proyek.
- * Mendukung minggu melintasi batas pergantian bulan dengan sempurna.
+ * Menghitung nomor minggu berdasarkan kalender bulanan (reset setiap ganti bulan).
+ * 1-7 = Minggu 1, 8-14 = Minggu 2, 15-21 = Minggu 3, 22-akhir = Minggu 4.
  */
-export function getWeekNumberForDate(dateStr: string, projectStartDateStr: string): number {
-  const cleanDate = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
-  const cleanStart = projectStartDateStr.includes('T') ? projectStartDateStr.split('T')[0] : projectStartDateStr;
-  
-  const dDate = new Date(cleanDate + 'T12:00:00');
-  const dStart = new Date(cleanStart + 'T12:00:00');
-  
-  if (isNaN(dDate.getTime()) || isNaN(dStart.getTime())) {
-    return 1;
-  }
-  
-  const diffTime = dDate.getTime() - dStart.getTime();
-  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-  
-  if (diffDays < 0) {
-    return 1; // Transaksi sebelum proyek dimulai otomatis masuk Minggu 1
-  }
-  
-  return Math.floor(diffDays / 7) + 1;
+export function getWeekNumberForDate(dateStr: string): number {
+  const d = new Date(dateStr.includes('T') ? dateStr : `${dateStr}T12:00:00`);
+  if (isNaN(d.getTime())) return 1;
+
+  const day = d.getDate();
+  if (day <= 7) return 1;
+  if (day <= 14) return 2;
+  if (day <= 21) return 3;
+  return 4;
 }
 
 /**
  * Menghasilkan metadata periode lengkap (Minggu, Bulan Tahun, Tanggal, Jam WIB)
- * dari ISO string transaksi untuk konsistensi seluruh modul.
+ * menggunakan logika kalender bulanan (reset setiap bulan).
  */
-export function getTransactionPeriodMetadata(dateIsoStr: string, projectStartDateStr: string) {
-  const cleanDate = dateIsoStr.includes('T') ? dateIsoStr.split('T')[0] : dateIsoStr;
-  const weekNum = getWeekNumberForDate(cleanDate, projectStartDateStr);
-  
-  let monthYearLabel = '';
-  try {
-    const d = new Date(cleanDate + 'T12:00:00');
-    if (!isNaN(d.getTime())) {
-      monthYearLabel = new Intl.DateTimeFormat('id-ID', {
-        month: 'long',
-        year: 'numeric'
-      }).format(d);
-    }
-  } catch (e) {
-    monthYearLabel = 'September 2026';
+export function getTransactionPeriodMetadata(dateIsoStr: string) {
+  const d = new Date(dateIsoStr.includes('T') ? dateIsoStr : `${dateIsoStr}T12:00:00`);
+  if (isNaN(d.getTime())) {
+    return { weekNumber: 1, monthYear: 'September 2026', dateString: '', timeString: '' };
   }
+
+  const weekNum = getWeekNumberForDate(dateIsoStr);
   
-  let dateLabel = '';
-  try {
-    const d = new Date(cleanDate + 'T12:00:00');
-    if (!isNaN(d.getTime())) {
-      dateLabel = new Intl.DateTimeFormat('id-ID', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric'
-      }).format(d);
-    }
-  } catch (e) {
-    dateLabel = cleanDate;
-  }
+  const monthYearLabel = new Intl.DateTimeFormat('id-ID', {
+    month: 'long',
+    year: 'numeric'
+  }).format(d);
+  
+  const dateLabel = new Intl.DateTimeFormat('id-ID', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric'
+  }).format(d);
   
   let timeLabel = '07:00 WIB';
-  try {
-    if (dateIsoStr.includes('T')) {
-      const parts = dateIsoStr.split('T');
-      const timePart = parts[1].substring(0, 5); // HH:MM
-      timeLabel = `${timePart} WIB`;
-    } else {
-      timeLabel = `${getJakartaTimeInputString(dateIsoStr)} WIB`;
-    }
-  } catch (e) {
-    // fallback
+  if (dateIsoStr.includes('T')) {
+    const timePart = dateIsoStr.split('T')[1].substring(0, 5); // HH:MM
+    timeLabel = `${timePart} WIB`;
+  } else {
+    timeLabel = `${getJakartaTimeInputString(d)} WIB`;
   }
   
   return {

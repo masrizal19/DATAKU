@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { Card, Button, Badge, Modal, Input, TextArea, Select } from '../components/Common';
@@ -1051,7 +1051,7 @@ export const FinanceView: React.FC = () => {
     return <div className="text-center py-8">Pilih proyek aktif terlebih dahulu.</div>;
   }
 
-  const projectTxs = state.transactions.filter(t => t.projectId === activeProj.id);
+  const projectTxs = useMemo(() => state.transactions.filter(t => t.projectId === activeProj.id), [state.transactions, activeProj.id]);
   
   // Local transactions order to allow draft drag-and-drop
   const [localTxs, setLocalTxs] = useState<Transaction[]>([]);
@@ -1377,7 +1377,7 @@ export const FinanceView: React.FC = () => {
                     <div>
                       <h4 className="text-sm font-extrabold text-[#0F172A] leading-snug uppercase">{tx.sourceOrRecipient}</h4>
                       {(() => {
-                        const meta = getTransactionPeriodMetadata(tx.date, activeProj.startDate || '2026-09-01');
+                        const meta = getTransactionPeriodMetadata(tx.date);
                         return (
                           <>
                             <p className="text-[10px] text-[#64748B] font-extrabold uppercase mt-1 leading-none tracking-wide">

@@ -174,7 +174,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     };
     fetchSettings();
-  }, [state.currentUser?.id, applySettingsToState]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.currentUser?.id]);
 
   // Realtime subscription for public.app_settings
   useEffect(() => {
@@ -205,7 +206,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [state.currentUser?.id, applySettingsToState]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.currentUser?.id]);
 
   const updateIdentityConfig = useCallback((cfg: Partial<AppIdentityConfig>) => {
     setIdentityConfig(prev => {
@@ -264,10 +266,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const data = await transactionService.getTransactions(projectId);
       const mapped = data.map(mapSupabaseTransactionToApp);
-      setState(prev => ({
-        ...prev,
-        transactions: mapped
-      }));
+      
+      setState(prev => {
+        // Simple reference check or deep equality check to prevent unnecessary re-renders
+        if (prev.transactions.length === mapped.length && 
+            JSON.stringify(prev.transactions) === JSON.stringify(mapped)) {
+          return prev;
+        }
+        return {
+          ...prev,
+          transactions: mapped
+        };
+      });
     } catch (err) {
       console.error('Error loading transactions from Supabase:', err);
     }
@@ -279,10 +289,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const data = await materialService.getMaterials(projectId);
       const mapped = data.map(mapSupabaseMaterialToApp);
-      setState(prev => ({
-        ...prev,
-        materials: mapped
-      }));
+      
+      setState(prev => {
+        if (prev.materials.length === mapped.length && JSON.stringify(prev.materials) === JSON.stringify(mapped)) return prev;
+        return { ...prev, materials: mapped };
+      });
     } catch (err) {
       console.error('Error loading materials from Supabase:', err);
     }
@@ -300,11 +311,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const materialsMap = new Map<string, Material>(appMaterials.map(m => [m.id, m]));
       const mapped = logsData.map(l => mapSupabaseMaterialLogToApp(l, materialsMap));
 
-      setState(prev => ({
-        ...prev,
-        materials: appMaterials,
-        materialLogs: mapped
-      }));
+      setState(prev => {
+        if (prev.materialLogs.length === mapped.length && JSON.stringify(prev.materialLogs) === JSON.stringify(mapped) &&
+            prev.materials.length === appMaterials.length && JSON.stringify(prev.materials) === JSON.stringify(appMaterials)) return prev;
+        return { ...prev, materials: appMaterials, materialLogs: mapped };
+      });
     } catch (err) {
       console.error('Error loading material logs from Supabase:', err);
     }
@@ -316,10 +327,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const data = await reportService.getDailyReports(projectId);
       const mapped = data.map(mapSupabaseDailyReportToApp);
-      setState(prev => ({
-        ...prev,
-        dailyReports: mapped
-      }));
+      setState(prev => {
+        if (prev.dailyReports.length === mapped.length && JSON.stringify(prev.dailyReports) === JSON.stringify(mapped)) return prev;
+        return { ...prev, dailyReports: mapped };
+      });
     } catch (err) {
       console.error('Error loading daily reports from Supabase:', err);
     }
@@ -341,11 +352,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const mappedMasterWorkers = rawMasterWorkers.map(mapToMasterWorker);
 
       setMasterWorkers(mappedMasterWorkers);
-      setState(prev => ({
-        ...prev,
-        workers: mappedWorkers,
-        projectWeeks: projectWeeks
-      }));
+      setState(prev => {
+        if (prev.workers.length === mappedWorkers.length && JSON.stringify(prev.workers) === JSON.stringify(mappedWorkers) &&
+            prev.projectWeeks.length === projectWeeks.length && JSON.stringify(prev.projectWeeks) === JSON.stringify(projectWeeks)) return prev;
+        return { ...prev, workers: mappedWorkers, projectWeeks: projectWeeks };
+      });
     } catch (err) {
       console.error('Error loading workers from Supabase:', err);
     }
@@ -355,13 +366,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const loadProjects = useCallback(async () => {
     if (!isSupabaseConfigured) return;
     try {
-      const mandorUuid = await getMandorUuid(state.currentUser?.name);
+      // Use a functional state update to get current state without adding it to dependencies
+      let currentUser: any;
+      let activeProjectId: string | null = null;
+
+      setState(prev => {
+        currentUser = prev.currentUser;
+        activeProjectId = prev.activeProjectId;
+        return prev;
+      });
+
+      const mandorUuid = await getMandorUuid(currentUser?.name);
       const data = await projectService.getProjects(mandorUuid);
       const storedActiveId = localStorage.getItem(ACTIVE_PROJECT_KEY);
 
       const mapped = data.map(p => mapSupabaseProjectToProject(p, storedActiveId));
 
-      let nextActiveId = storedActiveId || state.activeProjectId;
+      let nextActiveId = storedActiveId || activeProjectId;
       const activeExists = mapped.some(p => p.id === nextActiveId && !p.isArchived);
       if (!activeExists) {
         const firstActive = mapped.find(p => !p.isArchived);
@@ -397,7 +418,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (err) {
       console.error('Error loading projects from Supabase:', err);
     }
-  }, [state.currentUser?.name, state.activeProjectId, loadTransactions, loadMaterials, loadMaterialLogs, loadDailyReports, loadWorkers]);
+  }, [loadTransactions, loadMaterials, loadMaterialLogs, loadDailyReports, loadWorkers]);
 
   // Set Active Project handler
   const setActiveProject = useCallback((id: string) => {
@@ -419,6 +440,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [loadTransactions, loadMaterials, loadMaterialLogs, loadDailyReports, loadWorkers]);
 
+  const activeProjectIdRef = React.useRef(state.activeProjectId);
+  React.useEffect(() => {
+    activeProjectIdRef.current = state.activeProjectId;
+  }, [state.activeProjectId]);
+
   // Realtime listener for cross-device database changes
   useEffect(() => {
     loadProjects();
@@ -431,19 +457,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         loadProjects();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, () => {
-        if (state.activeProjectId) loadTransactions(state.activeProjectId);
+        if (activeProjectIdRef.current) loadTransactions(activeProjectIdRef.current);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'materials' }, () => {
-        if (state.activeProjectId) loadMaterials(state.activeProjectId);
+        if (activeProjectIdRef.current) loadMaterials(activeProjectIdRef.current);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'material_transactions' }, () => {
-        if (state.activeProjectId) {
-          loadMaterialLogs(state.activeProjectId);
-          loadMaterials(state.activeProjectId);
+        if (activeProjectIdRef.current) {
+          loadMaterialLogs(activeProjectIdRef.current);
+          loadMaterials(activeProjectIdRef.current);
         }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'daily_reports' }, () => {
-        if (state.activeProjectId) loadDailyReports(state.activeProjectId);
+        if (activeProjectIdRef.current) loadDailyReports(activeProjectIdRef.current);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'dataku_workers' }, () => {
         loadWorkers();
@@ -453,17 +479,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'dataku_worker_payments' }, () => {
         loadWorkers();
-        if (state.activeProjectId) loadTransactions(state.activeProjectId);
+        if (activeProjectIdRef.current) loadTransactions(activeProjectIdRef.current);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'dataku_project_weeks' }, () => {
         loadWorkers();
       })
       .subscribe();
-
+      
     return () => {
-      supabase.removeChannel(channel);
+        supabase.removeChannel(channel);
     };
-  }, [loadProjects, loadWorkers, loadTransactions, loadMaterials, loadMaterialLogs, loadDailyReports, state.activeProjectId]);
+  }, [loadProjects, loadTransactions, loadMaterials, loadMaterialLogs, loadDailyReports, loadWorkers]);
 
   const triggerNotification = (message: string, type: 'WARNING' | 'ALERT' | 'INFO') => {
     const newNotif: Notification = {

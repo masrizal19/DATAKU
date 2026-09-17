@@ -47,6 +47,7 @@ export interface SupabaseTransaction {
   recipient: string;
   description: string;
   transaction_date: string;
+  transaction_at?: string;
   reference_id?: string;
   display_order?: number;
   created_by?: string;
