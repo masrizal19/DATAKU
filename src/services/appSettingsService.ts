@@ -7,6 +7,8 @@ export const APP_SETTINGS_STORAGE_KEY = 'dataku_app_settings_cache';
 
 // Convert DB row to frontend Identity state
 export function mapDbToIdentity(dbRow: any): AppIdentityConfig {
+  const settingsJson = dbRow.settings || {};
+  
   const nav: NavigationConfig = {
     ...DEFAULT_IDENTITY_CONFIG.navigationSettings!,
     activeBackgroundColor: dbRow.active_menu_color || DEFAULT_IDENTITY_CONFIG.navigationSettings!.activeBackgroundColor,
@@ -15,6 +17,8 @@ export function mapDbToIdentity(dbRow: any): AppIdentityConfig {
     activeOutlineWidth: dbRow.navigation_border_width ?? DEFAULT_IDENTITY_CONFIG.navigationSettings!.activeOutlineWidth,
     activeRadius: dbRow.navigation_radius ?? DEFAULT_IDENTITY_CONFIG.navigationSettings!.activeRadius,
     menuGap: dbRow.navigation_spacing ?? DEFAULT_IDENTITY_CONFIG.navigationSettings!.menuGap,
+    activePaddingX: settingsJson.navigation_padding_x ?? DEFAULT_IDENTITY_CONFIG.navigationSettings!.activePaddingX,
+    activePaddingY: settingsJson.navigation_padding_y ?? DEFAULT_IDENTITY_CONFIG.navigationSettings!.activePaddingY,
   };
 
   return {
@@ -43,17 +47,39 @@ export function mapDbToIdentity(dbRow: any): AppIdentityConfig {
 // Convert DB row to frontend Print state
 export function mapDbToPrintSettings(dbRow: any): GlobalPrintSettings {
   const defaultPS = DEFAULT_PRINT_SETTINGS;
-  const remotePerDoc = dbRow.settings?.perDocumentSettings || {};
+  const settingsJson = dbRow.settings || {};
+  const remotePerDoc = settingsJson.perDocumentSettings || {};
   
   return {
     ...defaultPS,
-    defaultPaperSize: (dbRow.print_paper_size as any) || 'A4',
-    defaultOrientation: (dbRow.print_orientation as any) || 'Otomatis',
+    defaultPaperSize: (dbRow.print_paper_size as any) || defaultPS.defaultPaperSize,
+    defaultOrientation: (dbRow.print_orientation as any) || defaultPS.defaultOrientation,
+    autoFitContent: settingsJson.autoFitContent ?? dbRow.auto_fit_content ?? defaultPS.autoFitContent,
+    defaultImageFormat: settingsJson.defaultImageFormat ?? dbRow.default_image_format ?? defaultPS.defaultImageFormat,
     perDocumentSettings: {
-      rekapKeuangan: { ...defaultPS.perDocumentSettings.rekapKeuangan, ...(remotePerDoc.rekapKeuangan || {}) },
-      rekapUpah: { ...defaultPS.perDocumentSettings.rekapUpah, ...(remotePerDoc.rekapUpah || {}) },
-      laporanProyek: { ...defaultPS.perDocumentSettings.laporanProyek, ...(remotePerDoc.laporanProyek || {}) },
-      slipGaji: { ...defaultPS.perDocumentSettings.slipGaji, ...(remotePerDoc.slipGaji || {}) }
+      rekapKeuangan: { 
+        ...defaultPS.perDocumentSettings.rekapKeuangan, 
+        ...(remotePerDoc.rekapKeuangan || {}),
+        paperSize: (dbRow.print_paper_size as any) || defaultPS.perDocumentSettings.rekapKeuangan.paperSize,
+        orientation: (dbRow.print_orientation as any) || defaultPS.perDocumentSettings.rekapKeuangan.orientation,
+        includeLogo: dbRow.print_logo_enabled ?? (remotePerDoc.rekapKeuangan?.includeLogo ?? defaultPS.perDocumentSettings.rekapKeuangan.includeLogo),
+        includeKop: dbRow.print_header_enabled ?? (remotePerDoc.rekapKeuangan?.includeKop ?? defaultPS.perDocumentSettings.rekapKeuangan.includeKop),
+        includeSignature: dbRow.stamp_enabled ?? (remotePerDoc.rekapKeuangan?.includeSignature ?? defaultPS.perDocumentSettings.rekapKeuangan.includeSignature),
+        ['logoWidth' as any]: dbRow.print_logo_width ?? (remotePerDoc.rekapKeuangan?.logoWidth ?? 80),
+        ['logoHeight' as any]: dbRow.print_logo_height ?? (remotePerDoc.rekapKeuangan?.logoHeight ?? 80),
+      } as any,
+      rekapUpah: { 
+        ...defaultPS.perDocumentSettings.rekapUpah, 
+        ...(remotePerDoc.rekapUpah || {}) 
+      },
+      laporanProyek: { 
+        ...defaultPS.perDocumentSettings.laporanProyek, 
+        ...(remotePerDoc.laporanProyek || {}) 
+      },
+      slipGaji: { 
+        ...defaultPS.perDocumentSettings.slipGaji, 
+        ...(remotePerDoc.slipGaji || {}) 
+      }
     }
   };
 }
@@ -61,7 +87,32 @@ export function mapDbToPrintSettings(dbRow: any): GlobalPrintSettings {
 // Convert Frontend states to DB payload
 export function mapStateToDb(identity: AppIdentityConfig, print: GlobalPrintSettings, user?: any) {
   const isDataUrl = identity.logoUrl?.startsWith('data:');
-  
+  const existingSettings = (() => {
+    try {
+      const stored = localStorage.getItem(APP_SETTINGS_STORAGE_KEY);
+      return stored ? JSON.parse(stored).settings || {} : {};
+    } catch(e) {
+      return {};
+    }
+  })();
+
+  const rekapKeuanganAny = (print.perDocumentSettings?.rekapKeuangan || {}) as any;
+
+  const nextSettings = {
+    ...existingSettings,
+    navigation_padding_x: identity.navigationSettings?.activePaddingX,
+    navigation_padding_y: identity.navigationSettings?.activePaddingY,
+    avatar_url: user?.photo || user?.avatar_url || existingSettings.avatar_url || null,
+    print_stamp_height: rekapKeuanganAny.stampHeight || existingSettings.print_stamp_height || null,
+    print_company_name: rekapKeuanganAny.companyName || existingSettings.print_company_name || null,
+    print_address: rekapKeuanganAny.address || existingSettings.print_address || null,
+    print_phone: rekapKeuanganAny.phone || existingSettings.print_phone || null,
+    print_email: rekapKeuanganAny.email || existingSettings.print_email || null,
+    perDocumentSettings: print.perDocumentSettings,
+    autoFitContent: print.autoFitContent,
+    defaultImageFormat: print.defaultImageFormat
+  };
+
   return {
     app_name: identity.appName,
     app_tagline: identity.tagline,
@@ -70,6 +121,8 @@ export function mapStateToDb(identity: AppIdentityConfig, print: GlobalPrintSett
     logo_scale: identity.logoScale / 100,
     logo_position_x: identity.logoX,
     logo_position_y: identity.logoY,
+    logo_width: rekapKeuanganAny.logoWidth || 80,
+    logo_height: rekapKeuanganAny.logoHeight || 80,
     app_name_font_size: identity.appNameSize,
     app_name_position_x: identity.appNameX,
     app_name_position_y: identity.appNameY,
@@ -93,6 +146,18 @@ export function mapStateToDb(identity: AppIdentityConfig, print: GlobalPrintSett
     // Print
     print_paper_size: print.defaultPaperSize,
     print_orientation: print.defaultOrientation,
+    print_logo_enabled: print.perDocumentSettings?.rekapKeuangan?.includeLogo ?? true,
+    print_logo_width: rekapKeuanganAny.logoWidth ?? 80,
+    print_logo_height: rekapKeuanganAny.logoHeight ?? 80,
+    print_header_enabled: print.perDocumentSettings?.rekapKeuangan?.includeKop ?? true,
+    print_header_text: print.perDocumentSettings?.rekapKeuangan?.includeKop ? (user?.company || 'PT Mandor Bangunan Sejahtera') : null,
+    print_footer_text: user?.email || 'pauji.mandor@dataku.com',
+
+    // Stamp
+    stamp_enabled: print.perDocumentSettings?.rekapKeuangan?.includeSignature ?? false,
+    stamp_url: null,
+    stamp_width: 100,
+    stamp_position: 'bottom-right',
 
     // Identity (Mandor)
     full_name: user?.name || null,
@@ -102,11 +167,9 @@ export function mapStateToDb(identity: AppIdentityConfig, print: GlobalPrintSett
     company_name: user?.company || null,
     job_title: user?.jobTitle || null,
     address: user?.address || null,
+    office_address: user?.address || null,
     
-    // Pass existing print per-document settings through JSONB
-    settings: {
-      perDocumentSettings: print.perDocumentSettings
-    }
+    settings: nextSettings
   };
 }
 

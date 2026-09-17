@@ -20,7 +20,7 @@ import { getMandorUuid } from '../services/userService';
 import { isUuidFormat } from '../utils/uuid';
 import { AppState, User, Project, Transaction, Material, MaterialLog, Worker, MasterWorker, DailyReport, Notification, MaterialCategory, AppIdentityConfig } from '../types';
 import { identityService, DEFAULT_IDENTITY_CONFIG } from '../services/identityService';
-import { appSettingsService } from '../services/appSettingsService';
+import { appSettingsService, mapDbToIdentity, mapDbToPrintSettings, APP_SETTINGS_STORAGE_KEY } from '../services/appSettingsService';
 import { printSettingsService } from '../services/printSettingsService';
 import {
   initialCurrentUser,
@@ -110,19 +110,102 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [identityConfig, setIdentityConfig] = useState<AppIdentityConfig>(() => identityService.loadConfig());
   const [printSettings, setPrintSettings] = useState<any>(() => printSettingsService.loadSettings());
 
-  // Cross-device settings fetch on login
+  // Method to apply settings received from DB (or Realtime) into React state & localStorage
+  const applySettingsToState = useCallback((dbRow: any) => {
+    if (!dbRow) return;
+
+    // Cache to localStorage
+    localStorage.setItem(APP_SETTINGS_STORAGE_KEY, JSON.stringify(dbRow));
+
+    // Map and update state for Identity Config
+    const mappedIdentity = mapDbToIdentity(dbRow);
+    setIdentityConfig(mappedIdentity);
+
+    // Map and update state for Print Settings
+    const mappedPrint = mapDbToPrintSettings(dbRow);
+    setPrintSettings(mappedPrint);
+
+    // Synchronize current user profile details
+    setState(prev => {
+      if (!prev.currentUser) return prev;
+
+      const updatedUser = {
+        ...prev.currentUser,
+        id: dbRow.mandor_id || prev.currentUser.id,
+        name: dbRow.full_name || dbRow.username || prev.currentUser.name || 'PAUJI',
+        photo: dbRow.settings?.avatar_url || dbRow.avatar_url || dbRow.logo_url || prev.currentUser.photo || 'https://images.unsplash.com/photo-1560250097-0b93528c311a?w=150&auto=format&fit=crop&q=80',
+        phone: dbRow.phone || prev.currentUser.phone || '0812-3456-7890',
+        email: dbRow.email || prev.currentUser.email || 'pauji.mandor@dataku.com',
+        address: dbRow.address || prev.currentUser.address || '',
+        company: dbRow.company_name || prev.currentUser.company || '',
+        jobTitle: dbRow.job_title || prev.currentUser.jobTitle || ''
+      };
+
+      const hasChanged = 
+        prev.currentUser.name !== updatedUser.name ||
+        prev.currentUser.phone !== updatedUser.phone ||
+        prev.currentUser.email !== updatedUser.email ||
+        prev.currentUser.address !== updatedUser.address ||
+        prev.currentUser.company !== updatedUser.company ||
+        prev.currentUser.jobTitle !== updatedUser.jobTitle ||
+        prev.currentUser.photo !== updatedUser.photo;
+
+      if (hasChanged) {
+        if (updatedUser.name) {
+          localStorage.setItem("dataku_user", updatedUser.name);
+        }
+        return {
+          ...prev,
+          currentUser: updatedUser
+        };
+      }
+      return prev;
+    });
+  }, []);
+
+  // Fetch settings on boot or user login
   useEffect(() => {
     const fetchSettings = async () => {
       if (state.currentUser?.id) {
         const dbRow = await appSettingsService.fetchSettings(state.currentUser.id);
         if (dbRow) {
-          setIdentityConfig(identityService.loadConfig());
-          setPrintSettings(printSettingsService.loadSettings());
+          applySettingsToState(dbRow);
         }
       }
     };
     fetchSettings();
-  }, [state.currentUser?.id]);
+  }, [state.currentUser?.id, applySettingsToState]);
+
+  // Realtime subscription for public.app_settings
+  useEffect(() => {
+    const mandorId = state.currentUser?.id;
+    if (!isSupabaseConfigured || !mandorId) return;
+
+    console.log(`[DATAKU] Subscribing to realtime app_settings updates for mandorId: ${mandorId}`);
+    
+    const channel = supabase
+      .channel(`realtime_settings_${mandorId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'app_settings',
+          filter: `mandor_id=eq.${mandorId}`
+        },
+        (payload: any) => {
+          console.log('[DATAKU] Realtime app_settings update received:', payload);
+          if (payload.new) {
+            applySettingsToState(payload.new);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [state.currentUser?.id, applySettingsToState]);
 
   const updateIdentityConfig = useCallback((cfg: Partial<AppIdentityConfig>) => {
     setIdentityConfig(prev => {
@@ -142,11 +225,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIdentityConfig(configToSave);
     if (state.currentUser?.id) {
       const success = await appSettingsService.saveSettings(state.currentUser.id, configToSave, printSettings, state.currentUser);
-      if (!success) triggerNotification('Gagal menyimpan pengaturan identitas.', 'ALERT');
+      if (!success) {
+        triggerNotification('Gagal menyimpan pengaturan identitas.', 'ALERT');
+      } else {
+        // Fetch newest copy from DB to trigger update
+        const dbRow = await appSettingsService.fetchSettings(state.currentUser.id);
+        if (dbRow) applySettingsToState(dbRow);
+      }
       return success;
     }
     return true;
-  }, [identityConfig, printSettings, state.currentUser]);
+  }, [identityConfig, printSettings, state.currentUser, applySettingsToState]);
 
   const updatePrintSettings = useCallback((cfg: any) => {
     setPrintSettings(cfg);
@@ -157,11 +246,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setPrintSettings(configToSave);
     if (state.currentUser?.id) {
       const success = await appSettingsService.saveSettings(state.currentUser.id, identityConfig, configToSave, state.currentUser);
-      if (!success) triggerNotification('Gagal menyimpan pengaturan cetak.', 'ALERT');
+      if (!success) {
+        triggerNotification('Gagal menyimpan pengaturan cetak.', 'ALERT');
+      } else {
+        // Fetch newest copy from DB to trigger update
+        const dbRow = await appSettingsService.fetchSettings(state.currentUser.id);
+        if (dbRow) applySettingsToState(dbRow);
+      }
       return success;
     }
     return true;
-  }, [identityConfig, printSettings, state.currentUser]);
+  }, [identityConfig, printSettings, state.currentUser, applySettingsToState]);
 
   // Domain loader for Transactions
   const loadTransactions = useCallback(async (projectId: string) => {
@@ -1538,12 +1633,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const updateCurrentUser = (user: User) => {
+  const updateCurrentUser = async (user: User) => {
     setState(prev => ({
       ...prev,
       currentUser: user
     }));
     localStorage.setItem("dataku_user", user.name);
+
+    if (isSupabaseConfigured && user.id) {
+      try {
+        await appSettingsService.saveSettings(user.id, identityConfig, printSettings, user);
+        // Refetch and re-apply newest settings record to ensure state is single-source
+        const dbRow = await appSettingsService.fetchSettings(user.id);
+        if (dbRow) applySettingsToState(dbRow);
+      } catch (err) {
+        console.error('[DATAKU] Failed to sync updated profile to app_settings:', err);
+      }
+    }
   };
 
   const restoreAllState = (newState: AppState) => {
