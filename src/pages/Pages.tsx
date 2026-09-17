@@ -2621,10 +2621,10 @@ export const WorkersView: React.FC<WorkersViewProps> = ({ onAddWorkerClick, onPa
           body * {
             visibility: hidden;
           }
-          #printable-area, #printable-area * {
+          #printable-area, #printable-area *, #printable-rekap-area, #printable-rekap-area *, .dataku-print-page, .dataku-print-page * {
             visibility: visible;
           }
-          #printable-area {
+          #printable-area, #printable-rekap-area, .dataku-print-container {
             position: absolute;
             left: 0;
             top: 0;

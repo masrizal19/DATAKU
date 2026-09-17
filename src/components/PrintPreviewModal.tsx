@@ -38,12 +38,10 @@ interface PrintPreviewModalProps {
 }
 
 const colorCache = new Map<string, string>();
-
 const getRgbaColor = (cssColor: string): string => {
   if (!cssColor || cssColor === 'transparent' || cssColor === 'none') return cssColor;
   if (cssColor.startsWith('rgb') || cssColor.startsWith('#')) return cssColor;
   if (colorCache.has(cssColor)) return colorCache.get(cssColor)!;
-
   try {
     const canvas = document.createElement('canvas');
     canvas.width = 1;
@@ -74,29 +72,25 @@ const normalizeColorsOnClone = (originalNode: HTMLElement, cloneNode: HTMLElemen
     'fill',
     'stroke'
   ];
-
   const originalElements = [originalNode, ...Array.from(originalNode.querySelectorAll<HTMLElement>('*'))];
   const cloneElements = [cloneNode, ...Array.from(cloneNode.querySelectorAll<HTMLElement>('*'))];
-
   for (let i = 0; i < originalElements.length; i++) {
     const orig = originalElements[i];
     const clone = cloneElements[i];
     const compStyle = window.getComputedStyle(orig);
-
     colorProps.forEach((prop) => {
       const val = compStyle[prop as any];
       if (val && (val.includes('oklab') || val.includes('color-mix') || val.includes('lab') || val.includes('lch'))) {
         (clone.style as any)[prop] = getRgbaColor(val);
       }
     });
-
     const boxShadow = compStyle.boxShadow;
     if (boxShadow && (boxShadow.includes('oklab') || boxShadow.includes('color-mix') || boxShadow.includes('lab') || boxShadow.includes('lch'))) {
-       clone.style.boxShadow = 'none';
+      clone.style.boxShadow = 'none';
     }
     const bgImage = compStyle.backgroundImage;
     if (bgImage && (bgImage.includes('oklab') || bgImage.includes('color-mix') || bgImage.includes('lab') || bgImage.includes('lch'))) {
-       clone.style.backgroundImage = 'none';
+      clone.style.backgroundImage = 'none';
     }
   }
 };
@@ -123,7 +117,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     globalSettings.perDocumentSettings[documentType]?.imageFormat || globalSettings.defaultImageFormat || 'JPEG'
   );
 
-  // Settings dropdown toggle
+  // Settings drawer toggle
   const [showSettingsDrawer, setShowSettingsDrawer] = useState(false);
   const [isExportingImage, setIsExportingImage] = useState(false);
   const [exportProgressText, setExportProgressText] = useState<string>('');
@@ -138,7 +132,6 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     if (orientationMode === 'Landscape') return 'Landscape';
 
     // OTOMATIS: Analyzes content structure
-    // If mutasi transaction table has many columns or large count, or if data is wide, pick Landscape
     const hasWideMutasi = reportData.mutasiDana.length > 8;
     const hasWideMaterial = reportData.ringkasanMaterial.length > 5;
     const hasManyWorkers = reportData.rekapUpah.length > 6;
@@ -194,13 +187,6 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     }
   }, [paperSize, effectiveOrientation]);
 
-  // Clean filename generator
-  const getCleanBaseFilename = () => {
-    const cleanProject = reportData.project.name.replace(/[^a-zA-Z0-9]/g, '_').replace(/__+/g, '_');
-    const dateStr = reportData.period.endDate.replace(/-/g, '');
-    return `DATAKU_${cleanProject}_Rekap_${dateStr}`;
-  };
-
   // Browser Print trigger
   const handlePrint = () => {
     window.print();
@@ -210,11 +196,13 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
   const categoriesList = useMemo(() => {
     const totalOut = reportData.ringkasan.pengeluaran;
     const categoriesMap: { [key: string]: number } = {};
+
     reportData.mutasiDana
       .filter((t) => t.type !== 'DANA_MASUK')
       .forEach((t) => {
         categoriesMap[t.category] = (categoriesMap[t.category] || 0) + t.amount;
       });
+
     return Object.keys(categoriesMap)
       .map((k) => ({
         name: k,
@@ -224,94 +212,179 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
       .sort((a, b) => b.amount - a.amount);
   }, [reportData]);
 
-  // Intelligent Pagination Data Split
-  // Page 1: Kop Surat, Metadata, Ringkasan I + Rincian Kategori, Awal Mutasi (first 8 rows or all if few)
-  // Page 2: Sisa Mutasi & Rekap Upah
-  // Page 3 (if needed): Ringkasan Material & Laporan Harian + Tanda Tangan
+  // Dynamic Pagination Engine
   const pagesData = useMemo(() => {
-    const txs = reportData.mutasiDana;
-    const workers = reportData.rekapUpah;
-    const materials = reportData.ringkasanMaterial;
-    const daily = reportData.laporanHarian;
-
-    // Thresholds per page depending on orientation
     const isLandscape = effectiveOrientation === 'Landscape';
-    const page1TxLimit = isLandscape ? 12 : 7;
-    const page2TxLimit = isLandscape ? 18 : 14;
+    const isF4 = paperSize === 'F4';
 
-    const page1Txs = txs.slice(0, page1TxLimit);
-    const remainingTxs = txs.slice(page1TxLimit);
+    // Weight capacity budget per page (units)
+    let maxPageCapacity = 62; // A4 Portrait default
+    if (isF4 && !isLandscape) maxPageCapacity = 70;
+    if (!isF4 && isLandscape) maxPageCapacity = 40;
+    if (isF4 && isLandscape) maxPageCapacity = 44;
 
-    const page2Txs = remainingTxs.slice(0, page2TxLimit);
-    const page3Txs = remainingTxs.slice(page2TxLimit);
+    const mutasi = reportData.mutasiDana || [];
+    const workers = reportData.rekapUpah || [];
+    const materials = reportData.ringkasanMaterial || [];
+    const daily = reportData.laporanHarian || [];
 
-    // If data is very small, 1 or 2 pages is sufficient
-    const totalTxs = txs.length;
-    const needsPage3 =
-      page3Txs.length > 0 ||
-      (remainingTxs.length > 0 && (workers.length > 5 || materials.length > 4 || daily.length > 4)) ||
-      (workers.length > 8 || materials.length > 8 || daily.length > 6);
+    const pages: Array<{
+      pageNumber: number;
+      showKop: boolean;
+      showRingkasan: boolean;
+      mutasiSlice: typeof mutasi;
+      showMutasiHeader: boolean;
+      upahSlice: typeof workers;
+      showUpahHeader: boolean;
+      materialSlice: typeof materials;
+      showMaterialHeader: boolean;
+      laporanSlice: typeof daily;
+      showLaporanHeader: boolean;
+      showSignature: boolean;
+    }> = [];
 
-    const needsPage2 =
-      remainingTxs.length > 0 ||
-      workers.length > 0 ||
-      materials.length > 0 ||
-      daily.length > 0 ||
-      totalTxs > page1TxLimit;
+    let currentMutasiIdx = 0;
+    let currentWorkerIdx = 0;
+    let currentMaterialIdx = 0;
+    let currentDailyIdx = 0;
+    let signaturePlaced = false;
 
-    const pages = [
-      {
-        pageNumber: 1,
-        showKop: true,
-        showRingkasan: true,
-        mutasiSlice: page1Txs,
-        isMutasiPartial: totalTxs > page1TxLimit,
-        showUpah: !needsPage2 && workers.length > 0,
-        upahSlice: !needsPage2 ? workers : [],
-        showMaterial: !needsPage2 && materials.length > 0,
-        materialSlice: !needsPage2 ? materials : [],
-        showLaporan: !needsPage2 && daily.length > 0,
-        laporanSlice: !needsPage2 ? daily : [],
-        showSignature: !needsPage2
+    let pageNum = 1;
+
+    while (
+      currentMutasiIdx < mutasi.length ||
+      currentWorkerIdx < workers.length ||
+      currentMaterialIdx < materials.length ||
+      currentDailyIdx < daily.length ||
+      !signaturePlaced
+    ) {
+      const isPage1 = pageNum === 1;
+      let remainingCapacity = maxPageCapacity;
+
+      const showKop = isPage1;
+      const showRingkasan = isPage1;
+
+      if (showKop) {
+        remainingCapacity -= 18; // Full Kop Header
+        remainingCapacity -= 8;  // Metadata grid
+      } else {
+        remainingCapacity -= 2.5; // Compact header
       }
-    ];
 
-    if (needsPage2) {
-      pages.push({
-        pageNumber: 2,
-        showKop: false,
-        showRingkasan: false,
-        mutasiSlice: page2Txs,
-        isMutasiPartial: page3Txs.length > 0,
-        showUpah: true,
-        upahSlice: needsPage3 ? workers.slice(0, isLandscape ? 10 : 6) : workers,
-        showMaterial: !needsPage3,
-        materialSlice: !needsPage3 ? materials : [],
-        showLaporan: !needsPage3,
-        laporanSlice: !needsPage3 ? daily : [],
-        showSignature: !needsPage3
-      });
-    }
+      if (showRingkasan) {
+        remainingCapacity -= 6.5; // Ringkasan Rekapitulasi
+        remainingCapacity -= 6.5; // Category percentage breakdown
+      }
 
-    if (needsPage3) {
+      remainingCapacity -= 2.0; // Footer space
+
+      // 1. Mutasi Dana
+      let pageMutasi: typeof mutasi = [];
+      let showMutasiHeader = false;
+
+      if (currentMutasiIdx < mutasi.length) {
+        showMutasiHeader = true;
+        remainingCapacity -= 3.5; // Table header
+
+        const maxRowsOnThisPage = Math.max(1, Math.floor(remainingCapacity / 1.5));
+        const endIdx = Math.min(mutasi.length, currentMutasiIdx + maxRowsOnThisPage);
+        pageMutasi = mutasi.slice(currentMutasiIdx, endIdx);
+        currentMutasiIdx = endIdx;
+        remainingCapacity -= (pageMutasi.length * 1.5);
+      }
+
+      // 2. Rekap Upah
+      let pageUpah: typeof workers = [];
+      let showUpahHeader = false;
+
+      if (currentMutasiIdx >= mutasi.length && currentWorkerIdx < workers.length && remainingCapacity >= 5.0) {
+        showUpahHeader = true;
+        remainingCapacity -= 3.5;
+
+        const maxRowsOnThisPage = Math.max(1, Math.floor(remainingCapacity / 1.5));
+        const endIdx = Math.min(workers.length, currentWorkerIdx + maxRowsOnThisPage);
+        pageUpah = workers.slice(currentWorkerIdx, endIdx);
+        currentWorkerIdx = endIdx;
+        remainingCapacity -= (pageUpah.length * 1.5);
+      }
+
+      // 3. Ringkasan Material
+      let pageMaterial: typeof materials = [];
+      let showMaterialHeader = false;
+
+      if (
+        currentMutasiIdx >= mutasi.length &&
+        currentWorkerIdx >= workers.length &&
+        currentMaterialIdx < materials.length &&
+        remainingCapacity >= 5.0
+      ) {
+        showMaterialHeader = true;
+        remainingCapacity -= 3.5;
+
+        const maxRowsOnThisPage = Math.max(1, Math.floor(remainingCapacity / 1.5));
+        const endIdx = Math.min(materials.length, currentMaterialIdx + maxRowsOnThisPage);
+        pageMaterial = materials.slice(currentMaterialIdx, endIdx);
+        currentMaterialIdx = endIdx;
+        remainingCapacity -= (pageMaterial.length * 1.5);
+      }
+
+      // 4. Laporan Harian
+      let pageDaily: typeof daily = [];
+      let showLaporanHeader = false;
+
+      if (
+        currentMutasiIdx >= mutasi.length &&
+        currentWorkerIdx >= workers.length &&
+        currentMaterialIdx >= materials.length &&
+        currentDailyIdx < daily.length &&
+        remainingCapacity >= 5.5
+      ) {
+        showLaporanHeader = true;
+        remainingCapacity -= 3.5;
+
+        const maxRowsOnThisPage = Math.max(1, Math.floor(remainingCapacity / 2.0));
+        const endIdx = Math.min(daily.length, currentDailyIdx + maxRowsOnThisPage);
+        pageDaily = daily.slice(currentDailyIdx, endIdx);
+        currentDailyIdx = endIdx;
+        remainingCapacity -= (pageDaily.length * 2.0);
+      }
+
+      // 5. Signature Block
+      let showSignature = false;
+      if (
+        currentMutasiIdx >= mutasi.length &&
+        currentWorkerIdx >= workers.length &&
+        currentMaterialIdx >= materials.length &&
+        currentDailyIdx >= daily.length &&
+        !signaturePlaced
+      ) {
+        if (remainingCapacity >= 9.5 || isPage1) {
+          showSignature = true;
+          signaturePlaced = true;
+        }
+      }
+
       pages.push({
-        pageNumber: 3,
-        showKop: false,
-        showRingkasan: false,
-        mutasiSlice: page3Txs,
-        isMutasiPartial: false,
-        showUpah: workers.length > (isLandscape ? 10 : 6),
-        upahSlice: workers.slice(isLandscape ? 10 : 6),
-        showMaterial: true,
-        materialSlice: materials,
-        showLaporan: true,
-        laporanSlice: daily,
-        showSignature: true
+        pageNumber: pageNum,
+        showKop,
+        showRingkasan,
+        mutasiSlice: pageMutasi,
+        showMutasiHeader,
+        upahSlice: pageUpah,
+        showUpahHeader,
+        materialSlice: pageMaterial,
+        showMaterialHeader,
+        laporanSlice: pageDaily,
+        showLaporanHeader,
+        showSignature
       });
+
+      pageNum++;
+      if (pageNum > 100) break; // Guard against infinite loop
     }
 
     return pages;
-  }, [reportData, effectiveOrientation]);
+  }, [reportData, effectiveOrientation, paperSize]);
 
   const totalPageCount = pagesData.length;
 
@@ -320,10 +393,9 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     if (!pagesContainerRef.current) return;
     setIsExportingImage(true);
     setDownloadSuccessInfo(null);
-
     const ext = imageFormat === 'PNG' ? 'png' : 'jpg';
     const mimeType = imageFormat === 'PNG' ? 'image/png' : 'image/jpeg';
-    const cleanProject = reportData.project.name.replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-');
+    const cleanProject = reportData.project.name.replace(/[^a-zA-Z0-9]/g, '_').replace(/__+/g, '_');
 
     try {
       const pageElements = Array.from(
@@ -334,18 +406,18 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
         throw new Error('Tidak ada halaman yang ditemukan.');
       }
 
+      const generatedImages: { fileName: string; blob: Blob; dataUrl: string }[] = [];
+
       for (let i = 0; i < pageElements.length; i++) {
         const pageEl = pageElements[i];
         const pageNum = i + 1;
         setExportProgressText(`Merender Halaman ${pageNum} dari ${pageElements.length}...`);
 
-        // High Quality Render with html2canvas (with CSS sanitization fallback)
         const exportClone = pageEl.cloneNode(true) as HTMLElement;
         exportClone.style.position = 'absolute';
         exportClone.style.left = '-9999px';
         exportClone.style.top = '0';
         pageEl.parentNode?.insertBefore(exportClone, pageEl.nextSibling);
-
         normalizeColorsOnClone(pageEl, exportClone);
 
         const canvas = await html2canvas(exportClone, {
@@ -367,30 +439,37 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
             });
           }
         });
-
         exportClone.remove();
 
-        const blob = await new Promise<Blob>((resolve, reject) => {
-          canvas.toBlob((b) => {
-            if (b) resolve(b);
-            else reject(new Error('Canvas toBlob failed'));
-          }, mimeType, 0.95);
-        });
+        const dataUrl = canvas.toDataURL(mimeType, 0.95);
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
+        const fileName = `DATAKU_${cleanProject}_Rekap_${paperSize}_Halaman_${pageNum}.${ext}`;
 
-        const url = URL.createObjectURL(blob);
-        const fileName = `DATAKU-Rekap-${cleanProject}-Halaman-${pageNum}.${ext}`;
+        generatedImages.push({ fileName, blob, dataUrl });
+      }
 
+      if (generatedImages.length === 1) {
+        const item = generatedImages[0];
         const a = document.createElement('a');
-        a.href = url;
-        a.download = fileName;
+        a.href = item.dataUrl;
+        a.download = item.fileName;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-
-        if (pageElements.length > 1 && i < pageElements.length - 1) {
-          await new Promise((r) => setTimeout(r, 400));
-        }
+      } else {
+        setExportProgressText('Mengemas ke file ZIP...');
+        const zip = new JSZip();
+        generatedImages.forEach(img => zip.file(img.fileName, img.blob));
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        const zipUrl = URL.createObjectURL(zipBlob);
+        const a = document.createElement('a');
+        a.href = zipUrl;
+        a.download = `DATAKU_${cleanProject}_Rekap_${paperSize}_Semua_Halaman.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(zipUrl);
       }
 
       setDownloadSuccessInfo(`✓ Berhasil mengunduh ${pageElements.length} halaman gambar ${imageFormat}.`);
@@ -406,9 +485,10 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
   return (
     <div className="fixed inset-0 bg-[#0F172A]/85 flex items-center justify-center z-50 p-2 sm:p-4 select-none animate-fade-in overflow-y-auto print:p-0 print:bg-white print:static print:overflow-visible">
       <div className="bg-white border-3 border-[#0F172A] rounded-2xl w-full max-w-5xl shadow-neo-lg overflow-hidden flex flex-col max-h-[95vh] print:max-h-none print:border-none print:shadow-none print:w-full print:rounded-none">
+        
         {/* Modal Top Actions Header (Hidden when printing) */}
         <div className="bg-[#FAF8FF] border-b-2 border-[#0F172A] p-3 sm:p-4 flex flex-wrap justify-between items-center gap-2.5 print:hidden">
-          {/* Left: Title and Format Status Indicator Badge */}
+          {/* Left: Title and Spec Indicator Badge */}
           <div className="flex flex-col sm:flex-row sm:items-center gap-2">
             <div className="flex items-center gap-2">
               <span className="w-3 h-3 rounded-full bg-emerald-500 border border-[#0F172A]" />
@@ -416,7 +496,6 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                 PREVIEW CETAK &amp; DOKUMEN REKAP
               </h3>
             </div>
-
             {/* Spec Indicator Badge */}
             <div className="flex items-center gap-1.5 text-[10px] font-extrabold text-slate-700 bg-white border border-[#0F172A] px-2.5 py-1 rounded-lg shadow-neo-sm">
               <span className="text-[#0284C7] uppercase">{paperSize}</span>
@@ -427,12 +506,13 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
               </span>
               <span>•</span>
               <span className="text-emerald-700 font-mono font-black">{totalPageCount} Halaman</span>
+              <span className="text-slate-400 font-mono">({reportData.mutasiDana.length} tx)</span>
             </div>
           </div>
 
-          {/* Right: Action Buttons (Cetak/PDF, Export JPEG/PNG, Excel, CSV, Config, Close) */}
+          {/* Right: Action Buttons */}
           <div className="flex flex-wrap items-center gap-2">
-            {/* Quick Settings Dropdown Toggle */}
+            {/* Format Settings Toggle */}
             <button
               onClick={() => setShowSettingsDrawer(!showSettingsDrawer)}
               className={`px-2.5 py-1.5 font-bold text-xs rounded-xl border-2 border-[#0F172A] shadow-neo-sm flex items-center gap-1 cursor-pointer transition-all ${
@@ -459,9 +539,8 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
               disabled={isExportingImage}
               className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white font-extrabold text-xs rounded-xl border-2 border-[#0F172A] shadow-neo-sm flex items-center gap-1.5 cursor-pointer transition-all active:translate-y-0.5 disabled:opacity-50"
             >
-              {isExportingImage ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" /> Mengunduh...
+              {isExportingImage ? (                <>
+                  <Loader2 className="w-4 h-4 animate-spin" /> {exportProgressText || 'Mengunduh...'}
                 </>
               ) : (
                 <>
@@ -470,7 +549,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
               )}
             </button>
 
-            {/* Excel 5 Sheet */}
+            {/* Excel */}
             <button
               onClick={() => exportReportToExcel(reportData)}
               className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl border-2 border-[#0F172A] shadow-neo-sm flex items-center gap-1.5 cursor-pointer transition-all active:translate-y-0.5"
@@ -497,86 +576,55 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
           </div>
         </div>
 
-        {/* Expandable Format Settings Bar (Clean & Responsive) */}
+        {/* Format Settings Drawer */}
         {showSettingsDrawer && (
-          <div className="bg-amber-50/90 border-b-2 border-[#0F172A] p-3 sm:px-5 sm:py-3 text-xs font-bold text-slate-900 grid grid-cols-1 sm:grid-cols-4 gap-3 select-none animate-fade-in print:hidden">
-            {/* 1. UKURAN KERTAS */}
+          <div className="bg-amber-50 border-b-2 border-[#0F172A] p-3 text-xs font-bold text-slate-900 grid grid-cols-1 sm:grid-cols-3 gap-3 print:hidden animate-fade-in">
             <div>
-              <label className="text-[10px] uppercase font-extrabold text-slate-500 block mb-1">
-                Ukuran Kertas:
-              </label>
+              <label className="text-[10px] uppercase font-extrabold text-slate-500 block mb-1">Ukuran Kertas:</label>
               <div className="flex gap-1.5">
                 {(['A4', 'F4'] as PaperSize[]).map((sz) => (
                   <button
                     key={sz}
                     type="button"
                     onClick={() => handleSaveConfig(sz, orientationMode, autoFit, imageFormat)}
-                    className={`flex-1 py-1 px-2 rounded-lg border-2 text-center text-xs font-extrabold cursor-pointer transition-all ${
-                      paperSize === sz
-                        ? 'bg-[#0284C7] text-white border-[#0F172A] shadow-neo-sm'
-                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                    className={`flex-1 py-1.5 px-2 rounded-lg border-2 text-xs font-extrabold cursor-pointer transition-all ${
+                      paperSize === sz ? 'bg-[#0284C7] text-white border-[#0F172A]' : 'bg-white text-slate-700 border-slate-300'
                     }`}
                   >
-                    {sz} {sz === 'A4' ? '(210×297)' : '(215×330)'}
+                    {sz} {sz === 'F4' ? '(Folio)' : ''}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* 2. ORIENTASI */}
             <div>
-              <label className="text-[10px] uppercase font-extrabold text-slate-500 block mb-1">
-                Orientasi:
-              </label>
-              <div className="flex gap-1">
+              <label className="text-[10px] uppercase font-extrabold text-slate-500 block mb-1">Orientasi Halaman:</label>
+              <div className="flex gap-1.5">
                 {(['Otomatis', 'Portrait', 'Landscape'] as PageOrientation[]).map((ori) => (
                   <button
                     key={ori}
                     type="button"
                     onClick={() => handleSaveConfig(paperSize, ori, autoFit, imageFormat)}
-                    className={`flex-1 py-1 px-1.5 rounded-lg border-2 text-center text-[10px] font-extrabold cursor-pointer transition-all ${
-                      orientationMode === ori
-                        ? 'bg-[#0284C7] text-white border-[#0F172A] shadow-neo-sm'
-                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                    className={`flex-1 py-1.5 px-2 rounded-lg border-2 text-xs font-extrabold cursor-pointer transition-all ${
+                      orientationMode === ori ? 'bg-[#0284C7] text-white border-[#0F172A]' : 'bg-white text-slate-700 border-slate-300'
                     }`}
                   >
-                    {ori === 'Otomatis' ? 'Auto' : ori}
+                    {ori}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* 3. AUTO FIT CONTENT */}
             <div>
-              <label className="text-[10px] uppercase font-extrabold text-slate-500 block mb-1">
-                Tata Letak &amp; Isi:
-              </label>
-              <label className="flex items-center gap-2 p-1.5 bg-white border-2 border-slate-300 rounded-lg cursor-pointer hover:border-slate-400">
-                <input
-                  type="checkbox"
-                  checked={autoFit}
-                  onChange={(e) => handleSaveConfig(paperSize, orientationMode, e.target.checked, imageFormat)}
-                  className="w-4 h-4 rounded text-[#0284C7] focus:ring-[#0284C7] cursor-pointer"
-                />
-                <span className="text-[11px] font-bold text-slate-800">Sesuaikan otomatis dengan isi</span>
-              </label>
-            </div>
-
-            {/* 4. FORMAT GAMBAR */}
-            <div>
-              <label className="text-[10px] uppercase font-extrabold text-slate-500 block mb-1">
-                Format Gambar:
-              </label>
+              <label className="text-[10px] uppercase font-extrabold text-slate-500 block mb-1">Format Gambar Export:</label>
               <div className="flex gap-1.5">
                 {(['JPEG', 'PNG'] as ImageExportFormat[]).map((fmt) => (
                   <button
                     key={fmt}
                     type="button"
                     onClick={() => handleSaveConfig(paperSize, orientationMode, autoFit, fmt)}
-                    className={`flex-1 py-1 px-2 rounded-lg border-2 text-center text-xs font-extrabold cursor-pointer transition-all ${
-                      imageFormat === fmt
-                        ? 'bg-purple-600 text-white border-[#0F172A] shadow-neo-sm'
-                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                    className={`flex-1 py-1.5 px-2 rounded-lg border-2 text-xs font-extrabold cursor-pointer transition-all ${
+                      imageFormat === fmt ? 'bg-purple-600 text-white border-[#0F172A]' : 'bg-white text-slate-700 border-slate-300'
                     }`}
                   >
                     {fmt}
@@ -587,23 +635,10 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
           </div>
         )}
 
-        {/* Progress or Success Toast Banner */}
-        {isExportingImage && (
-          <div className="bg-purple-100 border-b border-purple-300 px-4 py-2 text-xs font-bold text-purple-900 flex items-center justify-between animate-pulse">
-            <div className="flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin text-purple-700" />
-              <span>{exportProgressText || 'Memproses export gambar berkualitas tinggi...'}</span>
-            </div>
-            <span className="text-[10px] text-purple-700 uppercase font-mono">150–200 DPI Rendering</span>
-          </div>
-        )}
-
+        {/* Success Alert Banner */}
         {downloadSuccessInfo && (
-          <div className="bg-emerald-100 border-b border-emerald-300 px-4 py-2 text-xs font-bold text-emerald-900 flex items-center justify-between animate-fade-in">
-            <div className="flex items-center gap-2">
-              <Check className="w-4 h-4 text-emerald-700" />
-              <span>{downloadSuccessInfo}</span>
-            </div>
+          <div className="bg-emerald-100 border-b-2 border-emerald-500 px-4 py-2 text-xs font-bold text-emerald-900 flex justify-between items-center print:hidden">
+            <span>{downloadSuccessInfo}</span>
             <button
               onClick={() => setDownloadSuccessInfo(null)}
               className="text-emerald-700 hover:text-emerald-900 font-extrabold text-sm"
@@ -616,7 +651,8 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
         {/* Paper Container for Scrolling / Print Target */}
         <div
           ref={pagesContainerRef}
-          className="flex-1 overflow-y-auto p-4 sm:p-8 bg-slate-200/90 flex flex-col items-center gap-8 print:p-0 print:bg-white print:overflow-visible print:gap-0"
+          id="printable-rekap-area"
+          className="dataku-print-container flex-1 overflow-y-auto p-4 sm:p-8 bg-slate-200/90 flex flex-col items-center gap-8 print:p-0 print:bg-white print:overflow-visible print:gap-0"
         >
           {pagesData.map((page, index) => {
             const pageNum = index + 1;
@@ -632,7 +668,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                 }}
               >
                 {/* On-Screen Subtle Page Header Indicator (Hidden when printing/exporting) */}
-                <div 
+                <div
                   className="print:hidden absolute -top-3 left-4 bg-[#0F172A] text-white text-[9px] font-extrabold uppercase px-2 py-0.5 rounded shadow-neo-sm tracking-wider"
                   data-html2canvas-ignore="true"
                 >
@@ -753,91 +789,88 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                         </div>
                         <div className="border-r border-slate-200 pr-2">
                           <span className="text-slate-500 text-[9px] font-bold uppercase block">Upah Tukang</span>
-                          <span className="font-extrabold text-amber-800 text-sm block mt-0.5">
+                          <span className="font-extrabold text-amber-700 text-sm block mt-0.5">
                             {formatRupiah(reportData.ringkasan.upahTukang)}
                           </span>
                         </div>
                         <div className="border-r border-slate-200 pr-2">
-                          <span className="text-slate-500 text-[9px] font-bold uppercase block">Bahan / Material</span>
-                          <span className="font-extrabold text-slate-800 text-sm block mt-0.5">
-                            {formatRupiah(reportData.ringkasan.pembelianMaterial)}
+                          <span className="text-slate-500 text-[9px] font-bold uppercase block">Bahan/Material</span>
+                          <span className="font-extrabold text-blue-700 text-sm block mt-0.5">
+                            {formatRupiah(reportData.ringkasan.material)}
                           </span>
                         </div>
-                        <div className="col-span-2 sm:col-span-1 bg-emerald-50/60 p-1.5 rounded">
-                          <span className="text-slate-600 text-[9px] font-bold uppercase block">Sisa Kas</span>
-                          <span className="font-black text-emerald-800 text-sm block mt-0.5">
-                            {formatRupiah(reportData.ringkasan.saldoKas)}
+                        <div className="pl-1">
+                          <span className="text-slate-500 text-[9px] font-bold uppercase block">Sisa Kas</span>
+                          <span
+                            className={`font-black text-sm block mt-0.5 ${
+                              reportData.ringkasan.sisaKas >= 0 ? 'text-emerald-800' : 'text-red-700'
+                            }`}
+                          >
+                            {formatRupiah(reportData.ringkasan.sisaKas)}
                           </span>
                         </div>
                       </div>
 
-                      {/* Rincian Persentase Pengeluaran Berdasarkan Kategori */}
-                      <div className="mt-3 border-t border-slate-200 pt-2.5 break-inside-avoid">
-                        <span className="text-slate-500 text-[9px] font-extrabold uppercase block mb-1">
-                          Rincian Persentase Pengeluaran Berdasarkan Kategori
-                        </span>
-                        <div 
-                          className="grid gap-2 text-[10px]"
-                          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))' }}
-                        >
-                          {categoriesList.map((c, idx) => (
-                            <div key={idx} className="bg-slate-50 p-1.5 rounded border border-slate-200 h-auto break-inside-avoid flex flex-col justify-center">
-                              <span className="text-slate-600 font-extrabold uppercase block break-words whitespace-normal leading-tight">{c.name}</span>
-                              <span className="font-extrabold text-slate-950 block mt-0.5 break-words whitespace-normal leading-tight">
-                                {formatRupiah(c.amount)}{' '}
-                                <span className="text-slate-500 font-normal inline-block">({c.percentage}%)</span>
-                              </span>
-                            </div>
-                          ))}
-                          {categoriesList.length === 0 && (
-                            <div className="col-span-full text-slate-400 font-medium italic">
-                              Belum ada pengeluaran tercatat.
-                            </div>
-                          )}
+                      {/* Expense Categories Breakdown */}
+                      {categoriesList.length > 0 && (
+                        <div className="mt-2 p-2 bg-white border border-slate-200 rounded">
+                          <p className="text-[10px] font-black uppercase text-slate-700 mb-1.5">
+                            RINCIAN PERSENTASE PENGELUARAN BERDASARKAN KATEGORI:
+                          </p>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px]">
+                            {categoriesList.map((cat, idx) => (
+                              <div key={idx} className="flex justify-between items-center bg-slate-50 p-1 px-2 rounded border border-slate-200">
+                                <span className="font-bold text-slate-800 truncate">{cat.name}</span>
+                                <span className="font-black text-slate-900 ml-1">{cat.percentage}%</span>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   )}
 
-                  {/* SECTION II: MUTASI DANA SLICE */}
-                  {page.mutasiSlice.length > 0 && (
+                  {/* SECTION II: DAFTAR MUTASI DANA */}
+                  {page.showMutasiHeader && (
                     <div className="my-3">
                       <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 border-b-2 border-slate-900 pb-1 mb-2">
-                        II. DAFTAR MUTASI DANA {page.isMutasiPartial ? `(Lanjutan Halaman ${pageNum})` : `(${reportData.mutasiDana.length} Transaksi)`}
+                        II. DAFTAR MUTASI DANA {pageNum > 1 ? '(Lanjutan)' : ''}
                       </h3>
                       <table className="w-full text-left text-[10px] border-collapse border border-slate-300">
                         <thead>
                           <tr className="bg-slate-100 text-slate-800 font-bold uppercase">
-                            <th className="p-1.5 border border-slate-300">Tanggal</th>
-                            <th className="p-1.5 border border-slate-300">Jenis</th>
-                            <th className="p-1.5 border border-slate-300">Kategori</th>
-                            <th className="p-1.5 border border-slate-300">Keterangan</th>
-                            <th className="p-1.5 border border-slate-300">Sumber / Penerima</th>
-                            <th className="p-1.5 border border-slate-300 text-right">Nominal</th>
+                            <th className="p-1.5 border border-slate-300 w-8 text-center">No</th>
+                            <th className="p-1.5 border border-slate-300">Tanggal &amp; Waktu</th>
+                            <th className="p-1.5 border border-slate-300">Tipe / Kategori</th>
+                            <th className="p-1.5 border border-slate-300">Keterangan / Deskripsi</th>
+                            <th className="p-1.5 border border-slate-300 text-right">Jumlah (Rp)</th>
                           </tr>
                         </thead>
                         <tbody>
                           {page.mutasiSlice.map((tx, idx) => (
-                            <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
-                              <td className="p-1.5 border border-slate-300 whitespace-nowrap">
+                            <tr key={tx.id || idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
+                              <td className="p-1.5 border border-slate-300 text-center text-slate-500 font-medium">{idx + 1}</td>
+                              <td className="p-1.5 border border-slate-300 whitespace-nowrap font-medium">
                                 {formatTanggalWaktu(tx.date)}
                               </td>
-                              <td className="p-1.5 border border-slate-300 font-bold text-[9px] uppercase">
-                                {tx.type === 'DANA_MASUK' ? 'DANA MASUK' : 'PENGELUARAN'}
+                              <td className="p-1.5 border border-slate-300">
+                                <span
+                                  className={`inline-block px-1.5 py-0.5 text-[9px] font-extrabold rounded uppercase ${
+                                    tx.type === 'DANA_MASUK' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
+                                  }`}
+                                >
+                                  {tx.category}
+                                </span>
                               </td>
-                              <td className="p-1.5 border border-slate-300 font-semibold">{tx.category}</td>
-                              <td className="p-1.5 border border-slate-300 text-slate-600 italic break-words whitespace-normal min-w-[120px]">
+                              <td className="p-1.5 border border-slate-300 text-slate-700">
                                 {tx.notes || '-'}
                               </td>
-                              <td className="p-1.5 border border-slate-300 font-bold uppercase">
-                                {tx.sourceOrRecipient}
-                              </td>
                               <td
-                                className={`p-1.5 border border-slate-300 font-bold text-right whitespace-nowrap ${
+                                className={`p-1.5 border border-slate-300 text-right font-bold whitespace-nowrap ${
                                   tx.type === 'DANA_MASUK' ? 'text-emerald-700' : 'text-red-600'
                                 }`}
                               >
-                                {tx.type === 'DANA_MASUK' ? '+' : '-'} {formatRupiah(tx.amount)}
+                                {tx.type === 'DANA_MASUK' ? '+' : '-'}{formatRupiah(tx.amount)}
                               </td>
                             </tr>
                           ))}
@@ -846,49 +879,31 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                     </div>
                   )}
 
-                  {/* SECTION III: REKAP UPAH MINGGUAN */}
-                  {page.showUpah && page.upahSlice.length > 0 && (
+                  {/* SECTION III: REKAP UPAH */}
+                  {page.showUpahHeader && page.upahSlice.length > 0 && (
                     <div className="my-3">
                       <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 border-b-2 border-slate-900 pb-1 mb-2">
-                        III. REKAP UPAH MINGGUAN ({page.upahSlice.length} Pekerja)
+                        III. REKAP UPAH TUKANG &amp; PEKERJA ({page.upahSlice.length} Orang)
                       </h3>
                       <table className="w-full text-left text-[10px] border-collapse border border-slate-300">
                         <thead>
                           <tr className="bg-slate-100 text-slate-800 font-bold uppercase">
-                            <th className="p-1.5 border border-slate-300">Minggu</th>
-                            <th className="p-1.5 border border-slate-300">Nama Tukang</th>
-                            <th className="p-1.5 border border-slate-300">Pekerjaan / Posisi</th>
-                            <th className="p-1.5 border border-slate-300 text-center">Hari</th>
-                            <th className="p-1.5 border border-slate-300 text-right">Tarif</th>
-                            <th className="p-1.5 border border-slate-300 text-right">Total Upah</th>
-                            <th className="p-1.5 border border-slate-300 text-center">Status</th>
+                            <th className="p-1.5 border border-slate-300">Nama Pekerja</th>
+                            <th className="p-1.5 border border-slate-300 text-center">Jabatan</th>
+                            <th className="p-1.5 border border-slate-300 text-right">Hari Kerja</th>
+                            <th className="p-1.5 border border-slate-300 text-right">Upah / Hari</th>
+                            <th className="p-1.5 border border-slate-300 text-right font-black">Total Upah</th>
                           </tr>
                         </thead>
                         <tbody>
                           {page.upahSlice.map((w, idx) => (
                             <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
-                              <td className="p-1.5 border border-slate-300 font-bold text-slate-700 whitespace-nowrap">
-                                M-{w.weekNumber || 1}
-                              </td>
-                              <td className="p-1.5 border border-slate-300 font-bold uppercase">{w.name}</td>
-                              <td className="p-1.5 border border-slate-300">{w.position}</td>
-                              <td className="p-1.5 border border-slate-300 text-center">{w.daysWorked} hr</td>
+                              <td className="p-1.5 border border-slate-300 font-bold uppercase">{w.workerName}</td>
+                              <td className="p-1.5 border border-slate-300 text-center">{w.role}</td>
+                              <td className="p-1.5 border border-slate-300 text-right">{w.daysWorked} Hari</td>
                               <td className="p-1.5 border border-slate-300 text-right">{formatRupiah(w.dailyRate)}</td>
-                              <td className="p-1.5 border border-slate-300 font-bold text-right text-slate-900">
-                                {formatRupiah(w.totalWages)}
-                              </td>
-                              <td className="p-1.5 border border-slate-300 text-center font-bold">
-                                <span
-                                  className={`px-1.5 py-0.5 rounded text-[8px] uppercase ${
-                                    w.status === 'LUNAS'
-                                      ? 'bg-emerald-100 text-emerald-800'
-                                      : w.status === 'SEBAGIAN'
-                                      ? 'bg-amber-100 text-amber-800'
-                                      : 'bg-red-100 text-red-800'
-                                  }`}
-                                >
-                                  {w.status}
-                                </span>
+                              <td className="p-1.5 border border-slate-300 text-right font-black text-slate-900">
+                                {formatRupiah(w.totalWage)}
                               </td>
                             </tr>
                           ))}
@@ -898,7 +913,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                   )}
 
                   {/* SECTION IV: RINGKASAN MATERIAL */}
-                  {page.showMaterial && page.materialSlice.length > 0 && (
+                  {page.showMaterialHeader && page.materialSlice.length > 0 && (
                     <div className="my-3">
                       <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 border-b-2 border-slate-900 pb-1 mb-2">
                         IV. RINGKASAN MATERIAL ({page.materialSlice.length} Item)
@@ -939,7 +954,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                   )}
 
                   {/* SECTION V: LAPORAN HARIAN */}
-                  {page.showLaporan && page.laporanSlice.length > 0 && (
+                  {page.showLaporanHeader && page.laporanSlice.length > 0 && (
                     <div className="my-3">
                       <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 border-b-2 border-slate-900 pb-1 mb-2">
                         V. LAPORAN HARIAN ({page.laporanSlice.length} Hari)
@@ -975,9 +990,9 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                     </div>
                   )}
 
-                  {/* Tanda Tangan Mandor & Pengawas (Last Page only) */}
+                  {/* Tanda Tangan Mandor & Pengawas */}
                   {page.showSignature && (
-                    <div className="mt-8 pt-4 grid grid-cols-2 gap-8 text-center text-xs font-bold">
+                    <div className="mt-8 pt-4 grid grid-cols-2 gap-8 text-center text-xs font-bold break-inside-avoid">
                       <div>
                         <p className="mb-14 text-slate-700">Mandor Proyek,</p>
                         <p className="underline uppercase tracking-wide text-slate-900 font-black">
@@ -996,8 +1011,8 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                   )}
                 </div>
 
-                {/* Page Footer (Numbering & Timestamp) */}
-                <div className="mt-6 pt-2 border-t border-slate-300 flex justify-between items-center text-[9px] text-slate-400 uppercase tracking-wider">
+                {/* Page Footer */}
+                <div className="mt-auto pt-3 border-t border-slate-300 flex justify-between items-center text-[9px] text-slate-400 uppercase tracking-wider dataku-print-footer">
                   <span>Dicetak melalui aplikasi DATAKU Mandor • {reportData.printDate}</span>
                   <span className="font-black text-slate-600">
                     Halaman {pageNum} dari {totalPageCount}
@@ -1021,32 +1036,67 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
               ? '215mm 330mm portrait'
               : '330mm 215mm landscape'
           };
-          margin: 10mm;
+          margin: 8mm;
         }
         @media print {
+          html, body {
+            width: 100% !important;
+            height: auto !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            overflow: visible !important;
+          }
           body * {
             visibility: hidden !important;
           }
-          .dataku-print-page, .dataku-print-page * {
+          #printable-rekap-area,
+          #printable-rekap-area *,
+          .dataku-print-page,
+          .dataku-print-page * {
             visibility: visible !important;
+          }
+          #printable-rekap-area {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: none !important;
+            background: #ffffff !important;
+            z-index: 999999 !important;
           }
           .dataku-print-page {
             position: relative !important;
-            page-break-after: always !important;
-            break-after: page !important;
+            top: auto !important;
+            left: auto !important;
             width: 100% !important;
             max-width: 100% !important;
             margin: 0 !important;
-            padding: 0 !important;
+            padding: 6mm 8mm !important;
             border: none !important;
             box-shadow: none !important;
             background: #ffffff !important;
             color: #000000 !important;
+            page-break-after: always !important;
+            break-after: page !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            box-sizing: border-box !important;
           }
-          .no-print {
-            display: none !important;
+          .dataku-print-page:last-child {
+            page-break-after: auto !important;
+            break-after: auto !important;
           }
-          nav, aside, header, button {
+          tr {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+          thead {
+            display: table-header-group !important;
+          }
+          nav, aside, header, button, .no-print {
             display: none !important;
           }
         }
