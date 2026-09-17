@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { Card, Button, Badge, Modal, Input, TextArea, Select } from '../components/Common';
 import { formatRupiah, formatTanggal, formatTanggalWaktu } from '../utils/format';
-import { combineDateTime } from '../utils/datetime';
+import { combineDateTime, getJakartaTimeInputString } from '../utils/datetime';
 import { ProjectCalculator } from '../components/Calculator';
 import {
   TrendingUp,
@@ -533,7 +533,18 @@ export const InventoryView: React.FC = () => {
     setEditLogSupplier(log.supplier || '');
     setEditLogPurpose(log.purposeOrWork || '');
     setEditLogNotes(log.notes || '');
-    setEditLogDate(log.date);
+    
+    const isoDateStr = log.date;
+    if (isoDateStr && isoDateStr.includes('T')) {
+      const parts = isoDateStr.split('T');
+      setEditLogDate(parts[0]);
+      const timePart = parts[1].substring(0, 5); // HH:MM
+      setEditLogTime(timePart);
+    } else {
+      setEditLogDate(isoDateStr || '');
+      setEditLogTime(getJakartaTimeInputString());
+    }
+    
     setShowEditLogModal(true);
   };
 
@@ -1032,10 +1043,28 @@ export const InventoryView: React.FC = () => {
 
 // --- VIEW 3: KEUANGAN VIEW & LEDGER ---
 export const FinanceView: React.FC = () => {
-  const { state, deleteTransaction, updateTransaction, updateTransactionsOrder } = useApp();
+  const { state, deleteTransaction, updateTransaction, updateTransactionsOrder, triggerNotification } = useApp();
   const activeProj = state.projects.find(p => p.id === state.activeProjectId);
   const [activeFilter, setActiveFilter] = useState<'SEMUA' | 'DANA_MASUK' | 'PENGELUARAN' | 'UPAH_TUKANG'>('SEMUA');
   
+  if (!activeProj) {
+    return <div className="text-center py-8">Pilih proyek aktif terlebih dahulu.</div>;
+  }
+
+  const projectTxs = state.transactions.filter(t => t.projectId === activeProj.id);
+  
+  // Local transactions order to allow draft drag-and-drop
+  const [localTxs, setLocalTxs] = useState<Transaction[]>([]);
+  const [hasPendingChanges, setHasPendingChanges] = useState<boolean>(false);
+  const [isSavingOrder, setIsSavingOrder] = useState<boolean>(false);
+
+  // Sync with projectTxs when projectTxs updates (unless we have unsaved local changes)
+  useEffect(() => {
+    if (!hasPendingChanges) {
+      setLocalTxs(projectTxs);
+    }
+  }, [projectTxs, hasPendingChanges]);
+
   // Drag and drop state
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
 
@@ -1048,22 +1077,43 @@ export const FinanceView: React.FC = () => {
     e.preventDefault();
   };
 
-  const handleDrop = async (e: React.DragEvent, targetIdx: number) => {
+  const handleDrop = (e: React.DragEvent, targetIdx: number) => {
     e.preventDefault();
     if (draggedIdx === null || draggedIdx === targetIdx) return;
     if (activeFilter !== 'SEMUA') return;
 
-    // Create reordered copy of filteredTxs
-    const reordered = [...filteredTxs];
+    // Create reordered copy of localTxs
+    const reordered = [...localTxs];
     const [draggedItem] = reordered.splice(draggedIdx, 1);
     reordered.splice(targetIdx, 0, draggedItem);
 
     setDraggedIdx(null);
-    await updateTransactionsOrder(reordered);
+    
+    // Normalize displayOrder locally (1, 2, 3...)
+    const normalized = reordered.map((item, idx) => ({
+      ...item,
+      displayOrder: idx + 1
+    }));
+    
+    setLocalTxs(normalized);
+    setHasPendingChanges(true);
   };
 
   const handleDragEnd = () => {
     setDraggedIdx(null);
+  };
+
+  const handleSaveOrder = async () => {
+    setIsSavingOrder(true);
+    try {
+      await updateTransactionsOrder(localTxs);
+      setHasPendingChanges(false);
+      triggerNotification('Urutan alur keuangan berhasil disimpan permanen di database.', 'INFO');
+    } catch (err) {
+      console.error('Failed to save manual order:', err);
+    } finally {
+      setIsSavingOrder(false);
+    }
   };
 
   // States for confirmation delete and edit modal
@@ -1083,20 +1133,15 @@ export const FinanceView: React.FC = () => {
   const [editType, setEditType] = useState<'DANA_MASUK' | 'PENGELUARAN' | 'UPAH_TUKANG'>('PENGELUARAN');
   const [isUpdatingTx, setIsUpdatingTx] = useState(false);
 
-  if (!activeProj) {
-    return <div className="text-center py-8">Pilih proyek aktif terlebih dahulu.</div>;
-  }
-
   const currentReportData = buildCurrentReportData(state, activeProj.id, { periode: 'bulan' });
 
-  const projectTxs = state.transactions.filter(t => t.projectId === activeProj.id);
   const totalDana = projectTxs.filter(t => t.type === 'DANA_MASUK').reduce((acc, c) => acc + c.amount, 0);
   const totalPengeluaran = projectTxs.filter(t => t.type === 'PENGELUARAN' || t.type === 'UPAH_TUKANG').reduce((acc, c) => acc + c.amount, 0);
   const totalWages = projectTxs.filter(t => t.type === 'UPAH_TUKANG').reduce((acc, c) => acc + c.amount, 0);
   const totalExpensesOnly = projectTxs.filter(t => t.type === 'PENGELUARAN').reduce((acc, c) => acc + c.amount, 0);
   const saldoProyek = totalDana - totalPengeluaran;
 
-  const filteredTxs = projectTxs.filter(tx => {
+  const filteredTxs = localTxs.filter(tx => {
     if (activeFilter === 'SEMUA') return true;
     return tx.type === activeFilter;
   });
@@ -1117,7 +1162,18 @@ export const FinanceView: React.FC = () => {
     setEditCategory(tx.category);
     setEditRecipient(tx.sourceOrRecipient);
     setEditNotes(tx.notes || '');
-    setEditDate(tx.date);
+    
+    const isoDateStr = tx.date;
+    if (isoDateStr && isoDateStr.includes('T')) {
+      const parts = isoDateStr.split('T');
+      setEditDate(parts[0]);
+      const timePart = parts[1].substring(0, 5); // HH:MM
+      setEditTime(timePart);
+    } else {
+      setEditDate(isoDateStr || '');
+      setEditTime(getJakartaTimeInputString());
+    }
+    
     setEditType(tx.type);
     setShowEditModal(true);
   };
@@ -1273,9 +1329,21 @@ export const FinanceView: React.FC = () => {
 
         {/* Timeline list */}
         <div className="space-y-3">
-          {activeFilter === 'SEMUA' && filteredTxs.length > 0 && (
-            <div className="text-[10px] text-[#0284C7] font-extrabold uppercase tracking-wide px-1 select-none flex items-center gap-1.5 animate-pulse">
-              <GripVertical className="w-3.5 h-3.5 text-[#0284C7]" /> Tahan & geser kartu transaksi untuk mengurutkan posisi alur keuangan secara visual.
+          {activeFilter === 'SEMUA' && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-sky-50 border-2 border-[#0F172A] p-3 rounded-xl select-none shadow-neo-sm">
+              <div className="text-[10px] text-[#0284C7] font-extrabold uppercase tracking-wide flex items-center gap-1.5">
+                <GripVertical className="w-4 h-4 text-[#0284C7] shrink-0" /> Tahan & geser kartu transaksi untuk mengurutkan posisi alur keuangan secara visual.
+              </div>
+              {hasPendingChanges && (
+                <button
+                  type="button"
+                  disabled={isSavingOrder}
+                  onClick={handleSaveOrder}
+                  className="px-4 py-2 bg-[#10B981] hover:bg-[#059669] disabled:bg-slate-300 text-white font-chunky text-xs uppercase rounded-xl border-2 border-[#0F172A] shadow-neo-sm hover:shadow-none transition-all cursor-pointer text-center shrink-0"
+                >
+                  {isSavingOrder ? '⏳ Menyimpan...' : '💾 Tetapkan Alur / Simpan Urutan'}
+                </button>
+              )}
             </div>
           )}
           {filteredTxs.map((tx, index) => {

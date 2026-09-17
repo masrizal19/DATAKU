@@ -17,7 +17,6 @@ export const transactionService = {
       // 1. Prioritas sorting: display_order ASC, created_at ASC, id ASC as fallback
       const { data, error } = await query
         .order('display_order', { ascending: true, nullsFirst: false })
-        .order('transaction_date', { ascending: true, nullsFirst: false })
         .order('created_at', { ascending: true })
         .order('id', { ascending: true });
 
@@ -114,12 +113,19 @@ export const transactionService = {
     let displayOrder = tx.display_order;
     if (displayOrder === undefined) {
       try {
-        const { data, error } = await supabase
+        let maxQuery = supabase
           .from('transactions')
           .select('display_order')
-          .eq('project_id', tx.project_id)
+          .eq('project_id', tx.project_id);
+
+        if (tx.created_by && isUuidFormat(tx.created_by)) {
+          maxQuery = maxQuery.eq('created_by', tx.created_by);
+        }
+
+        const { data, error } = await maxQuery
           .order('display_order', { ascending: false })
           .limit(1);
+
         if (!error && data && data.length > 0) {
           displayOrder = (Number(data[0].display_order) || 0) + 1;
         } else {
@@ -140,11 +146,13 @@ export const transactionService = {
       description: tx.description || '',
       transaction_date: tx.transaction_date ? tx.transaction_date.substring(0, 10) : new Date().toISOString().substring(0, 10),
       transaction_at: tx.transaction_date || new Date().toISOString(),
-      display_order: displayOrder
+      display_order: displayOrder,
+      updated_at: new Date().toISOString()
     };
 
     if (tx.created_by && isUuidFormat(tx.created_by)) {
       insertData.created_by = tx.created_by.trim();
+      insertData.mandor_id = tx.created_by.trim();
     }
 
     try {
@@ -154,22 +162,45 @@ export const transactionService = {
         .select()
         .single();
 
-      if (error) {
-        // Fallback jika kolom display_order belum ada
-        if (error.message.includes('display_order') || error.code === '42703') {
-          console.warn('display_order column missing during insert, retrying without it');
-          const { display_order, ...safeInsertData } = insertData;
-          const { data: safeData, error: safeError } = await supabase
+      if (!error) return data;
+
+      // Handle missing columns with fallbacks
+      if (error.message.includes('mandor_id') || error.code === '42703') {
+        console.warn('mandor_id column missing, retrying with only created_by...');
+        const { mandor_id, ...dataWithoutMandorId } = insertData;
+        const { data: d2, error: e2 } = await supabase
+          .from('transactions')
+          .insert([dataWithoutMandorId])
+          .select()
+          .single();
+        if (!e2) return d2;
+
+        if (e2.message.includes('display_order') || e2.code === '42703') {
+          console.warn('display_order column missing, retrying without display_order...');
+          const { display_order, ...dataWithoutBoth } = dataWithoutMandorId;
+          const { data: d3, error: e3 } = await supabase
             .from('transactions')
-            .insert([safeInsertData])
+            .insert([dataWithoutBoth])
             .select()
             .single();
-          if (safeError) throw safeError;
-          return safeData;
+          if (e3) throw e3;
+          return d3;
         }
-        throw error;
+        throw e2;
       }
-      return data;
+
+      if (error.message.includes('display_order') || error.code === '42703') {
+        console.warn('display_order column missing during insert, retrying without it');
+        const { display_order, ...safeInsertData } = insertData;
+        const { data: safeData, error: safeError } = await supabase
+          .from('transactions')
+          .insert([safeInsertData])
+          .select()
+          .single();
+        if (safeError) throw safeError;
+        return safeData;
+      }
+      throw error;
     } catch (err) {
       console.error('Error creating transaction:', err);
       throw err;
@@ -192,7 +223,9 @@ export const transactionService = {
     if (!isUuidFormat(id)) {
       throw new Error('Transaction ID tidak valid.');
     }
-    const updateData: Record<string, any> = {};
+    const updateData: Record<string, any> = {
+      updated_at: new Date().toISOString()
+    };
     if (updates.category !== undefined) updateData.category = updates.category;
     if (updates.amount !== undefined) updateData.amount = Number(updates.amount) || 0;
     if (updates.recipient !== undefined) updateData.recipient = updates.recipient;
