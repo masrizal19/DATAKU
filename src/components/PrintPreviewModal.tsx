@@ -197,10 +197,11 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     const totalOut = reportData.ringkasan.pengeluaran;
     const categoriesMap: { [key: string]: number } = {};
 
-    reportData.mutasiDana
+    (reportData.mutasiDana || [])
       .filter((t) => t.type !== 'DANA_MASUK')
       .forEach((t) => {
-        categoriesMap[t.category] = (categoriesMap[t.category] || 0) + t.amount;
+        const cat = t.category || 'Lain-lain';
+        categoriesMap[cat] = (categoriesMap[cat] || 0) + t.amount;
       });
 
     return Object.keys(categoriesMap)
@@ -212,182 +213,6 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
       .sort((a, b) => b.amount - a.amount);
   }, [reportData]);
 
-  // Dynamic Pagination Engine
-  const pagesData = useMemo(() => {
-    const isLandscape = effectiveOrientation === 'Landscape';
-    const isF4 = paperSize === 'F4';
-
-    // Weight capacity budget per page (units)
-    let maxPageCapacity = 62; // A4 Portrait default
-    if (isF4 && !isLandscape) maxPageCapacity = 70;
-    if (!isF4 && isLandscape) maxPageCapacity = 40;
-    if (isF4 && isLandscape) maxPageCapacity = 44;
-
-    const mutasi = reportData.mutasiDana || [];
-    const workers = reportData.rekapUpah || [];
-    const materials = reportData.ringkasanMaterial || [];
-    const daily = reportData.laporanHarian || [];
-
-    const pages: Array<{
-      pageNumber: number;
-      showKop: boolean;
-      showRingkasan: boolean;
-      mutasiSlice: typeof mutasi;
-      showMutasiHeader: boolean;
-      upahSlice: typeof workers;
-      showUpahHeader: boolean;
-      materialSlice: typeof materials;
-      showMaterialHeader: boolean;
-      laporanSlice: typeof daily;
-      showLaporanHeader: boolean;
-      showSignature: boolean;
-    }> = [];
-
-    let currentMutasiIdx = 0;
-    let currentWorkerIdx = 0;
-    let currentMaterialIdx = 0;
-    let currentDailyIdx = 0;
-    let signaturePlaced = false;
-
-    let pageNum = 1;
-
-    while (
-      currentMutasiIdx < mutasi.length ||
-      currentWorkerIdx < workers.length ||
-      currentMaterialIdx < materials.length ||
-      currentDailyIdx < daily.length ||
-      !signaturePlaced
-    ) {
-      const isPage1 = pageNum === 1;
-      let remainingCapacity = maxPageCapacity;
-
-      const showKop = isPage1;
-      const showRingkasan = isPage1;
-
-      if (showKop) {
-        remainingCapacity -= 18; // Full Kop Header
-        remainingCapacity -= 8;  // Metadata grid
-      } else {
-        remainingCapacity -= 2.5; // Compact header
-      }
-
-      if (showRingkasan) {
-        remainingCapacity -= 6.5; // Ringkasan Rekapitulasi
-        remainingCapacity -= 6.5; // Category percentage breakdown
-      }
-
-      remainingCapacity -= 2.0; // Footer space
-
-      // 1. Mutasi Dana
-      let pageMutasi: typeof mutasi = [];
-      let showMutasiHeader = false;
-
-      if (currentMutasiIdx < mutasi.length) {
-        showMutasiHeader = true;
-        remainingCapacity -= 3.5; // Table header
-
-        const maxRowsOnThisPage = Math.max(1, Math.floor(remainingCapacity / 1.5));
-        const endIdx = Math.min(mutasi.length, currentMutasiIdx + maxRowsOnThisPage);
-        pageMutasi = mutasi.slice(currentMutasiIdx, endIdx);
-        currentMutasiIdx = endIdx;
-        remainingCapacity -= (pageMutasi.length * 1.5);
-      }
-
-      // 2. Rekap Upah
-      let pageUpah: typeof workers = [];
-      let showUpahHeader = false;
-
-      if (currentMutasiIdx >= mutasi.length && currentWorkerIdx < workers.length && remainingCapacity >= 5.0) {
-        showUpahHeader = true;
-        remainingCapacity -= 3.5;
-
-        const maxRowsOnThisPage = Math.max(1, Math.floor(remainingCapacity / 1.5));
-        const endIdx = Math.min(workers.length, currentWorkerIdx + maxRowsOnThisPage);
-        pageUpah = workers.slice(currentWorkerIdx, endIdx);
-        currentWorkerIdx = endIdx;
-        remainingCapacity -= (pageUpah.length * 1.5);
-      }
-
-      // 3. Ringkasan Material
-      let pageMaterial: typeof materials = [];
-      let showMaterialHeader = false;
-
-      if (
-        currentMutasiIdx >= mutasi.length &&
-        currentWorkerIdx >= workers.length &&
-        currentMaterialIdx < materials.length &&
-        remainingCapacity >= 5.0
-      ) {
-        showMaterialHeader = true;
-        remainingCapacity -= 3.5;
-
-        const maxRowsOnThisPage = Math.max(1, Math.floor(remainingCapacity / 1.5));
-        const endIdx = Math.min(materials.length, currentMaterialIdx + maxRowsOnThisPage);
-        pageMaterial = materials.slice(currentMaterialIdx, endIdx);
-        currentMaterialIdx = endIdx;
-        remainingCapacity -= (pageMaterial.length * 1.5);
-      }
-
-      // 4. Laporan Harian
-      let pageDaily: typeof daily = [];
-      let showLaporanHeader = false;
-
-      if (
-        currentMutasiIdx >= mutasi.length &&
-        currentWorkerIdx >= workers.length &&
-        currentMaterialIdx >= materials.length &&
-        currentDailyIdx < daily.length &&
-        remainingCapacity >= 5.5
-      ) {
-        showLaporanHeader = true;
-        remainingCapacity -= 3.5;
-
-        const maxRowsOnThisPage = Math.max(1, Math.floor(remainingCapacity / 2.0));
-        const endIdx = Math.min(daily.length, currentDailyIdx + maxRowsOnThisPage);
-        pageDaily = daily.slice(currentDailyIdx, endIdx);
-        currentDailyIdx = endIdx;
-        remainingCapacity -= (pageDaily.length * 2.0);
-      }
-
-      // 5. Signature Block
-      let showSignature = false;
-      if (
-        currentMutasiIdx >= mutasi.length &&
-        currentWorkerIdx >= workers.length &&
-        currentMaterialIdx >= materials.length &&
-        currentDailyIdx >= daily.length &&
-        !signaturePlaced
-      ) {
-        if (remainingCapacity >= 9.5 || isPage1) {
-          showSignature = true;
-          signaturePlaced = true;
-        }
-      }
-
-      pages.push({
-        pageNumber: pageNum,
-        showKop,
-        showRingkasan,
-        mutasiSlice: pageMutasi,
-        showMutasiHeader,
-        upahSlice: pageUpah,
-        showUpahHeader,
-        materialSlice: pageMaterial,
-        showMaterialHeader,
-        laporanSlice: pageDaily,
-        showLaporanHeader,
-        showSignature
-      });
-
-      pageNum++;
-      if (pageNum > 100) break; // Guard against infinite loop
-    }
-
-    return pages;
-  }, [reportData, effectiveOrientation, paperSize]);
-
-  const totalPageCount = pagesData.length;
-
   // Multi-Page Image Export Handler (JPEG / PNG)
   const handleExportImage = async () => {
     if (!pagesContainerRef.current) return;
@@ -398,81 +223,51 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
     const cleanProject = reportData.project.name.replace(/[^a-zA-Z0-9]/g, '_').replace(/__+/g, '_');
 
     try {
-      const pageElements = Array.from(
-        pagesContainerRef.current.querySelectorAll<HTMLElement>('.dataku-print-page')
-      );
+      const printElement = pagesContainerRef.current.querySelector<HTMLElement>('.dataku-print-sheet') || pagesContainerRef.current;
+      setExportProgressText(`Merender gambar ${imageFormat}...`);
 
-      if (pageElements.length === 0) {
-        throw new Error('Tidak ada halaman yang ditemukan.');
-      }
+      const exportClone = printElement.cloneNode(true) as HTMLElement;
+      exportClone.style.position = 'absolute';
+      exportClone.style.left = '-9999px';
+      exportClone.style.top = '0';
+      exportClone.style.backgroundColor = '#ffffff';
+      document.body.appendChild(exportClone);
+      normalizeColorsOnClone(printElement, exportClone);
 
-      const generatedImages: { fileName: string; blob: Blob; dataUrl: string }[] = [];
+      const canvas = await html2canvas(exportClone, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: false,
+        backgroundColor: '#ffffff',
+        logging: false,
+        onclone: (clonedDoc) => {
+          const styleTags = clonedDoc.querySelectorAll('style');
+          styleTags.forEach(tag => {
+            if (tag.textContent) {
+              tag.textContent = tag.textContent
+                .replace(/oklab/g, 'rgba')
+                .replace(/color-mix/g, 'rgba')
+                .replace(/lab\(/g, 'rgba(')
+                .replace(/lch\(/g, 'rgba(');
+            }
+          });
+        }
+      });
+      exportClone.remove();
 
-      for (let i = 0; i < pageElements.length; i++) {
-        const pageEl = pageElements[i];
-        const pageNum = i + 1;
-        setExportProgressText(`Merender Halaman ${pageNum} dari ${pageElements.length}...`);
+      const dataUrl = canvas.toDataURL(mimeType, 0.95);
+      const res = await fetch(dataUrl);
+      const blob = await res.blob();
+      const fileName = `DATAKU_${cleanProject}_Rekap_${paperSize}.${ext}`;
 
-        const exportClone = pageEl.cloneNode(true) as HTMLElement;
-        exportClone.style.position = 'absolute';
-        exportClone.style.left = '-9999px';
-        exportClone.style.top = '0';
-        pageEl.parentNode?.insertBefore(exportClone, pageEl.nextSibling);
-        normalizeColorsOnClone(pageEl, exportClone);
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
 
-        const canvas = await html2canvas(exportClone, {
-          scale: 2,
-          useCORS: true,
-          allowTaint: false,
-          backgroundColor: '#ffffff',
-          logging: false,
-          onclone: (clonedDoc) => {
-            const styleTags = clonedDoc.querySelectorAll('style');
-            styleTags.forEach(tag => {
-              if (tag.textContent) {
-                tag.textContent = tag.textContent
-                  .replace(/oklab/g, 'rgba')
-                  .replace(/color-mix/g, 'rgba')
-                  .replace(/lab\(/g, 'rgba(')
-                  .replace(/lch\(/g, 'rgba(');
-              }
-            });
-          }
-        });
-        exportClone.remove();
-
-        const dataUrl = canvas.toDataURL(mimeType, 0.95);
-        const res = await fetch(dataUrl);
-        const blob = await res.blob();
-        const fileName = `DATAKU_${cleanProject}_Rekap_${paperSize}_Halaman_${pageNum}.${ext}`;
-
-        generatedImages.push({ fileName, blob, dataUrl });
-      }
-
-      if (generatedImages.length === 1) {
-        const item = generatedImages[0];
-        const a = document.createElement('a');
-        a.href = item.dataUrl;
-        a.download = item.fileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-      } else {
-        setExportProgressText('Mengemas ke file ZIP...');
-        const zip = new JSZip();
-        generatedImages.forEach(img => zip.file(img.fileName, img.blob));
-        const zipBlob = await zip.generateAsync({ type: 'blob' });
-        const zipUrl = URL.createObjectURL(zipBlob);
-        const a = document.createElement('a');
-        a.href = zipUrl;
-        a.download = `DATAKU_${cleanProject}_Rekap_${paperSize}_Semua_Halaman.zip`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(zipUrl);
-      }
-
-      setDownloadSuccessInfo(`✓ Berhasil mengunduh ${pageElements.length} halaman gambar ${imageFormat}.`);
+      setDownloadSuccessInfo(`✓ Berhasil mengunduh gambar ${imageFormat}.`);
     } catch (err: any) {
       console.error('Export image failed:', err);
       alert('Gagal mengekspor gambar. Silakan coba lagi.');
@@ -505,8 +300,9 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                 {orientationMode === 'Otomatis' && <span className="text-slate-500 font-normal"> (Auto)</span>}
               </span>
               <span>•</span>
-              <span className="text-emerald-700 font-mono font-black">{totalPageCount} Halaman</span>
-              <span className="text-slate-400 font-mono">({reportData.mutasiDana.length} tx)</span>
+              <span className="text-emerald-700 font-mono font-black">
+                {reportData.mutasiDana ? reportData.mutasiDana.length : 0} Transaksi
+              </span>
             </div>
           </div>
 
@@ -539,7 +335,8 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
               disabled={isExportingImage}
               className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white font-extrabold text-xs rounded-xl border-2 border-[#0F172A] shadow-neo-sm flex items-center gap-1.5 cursor-pointer transition-all active:translate-y-0.5 disabled:opacity-50"
             >
-              {isExportingImage ? (                <>
+              {isExportingImage ? (
+                <>
                   <Loader2 className="w-4 h-4 animate-spin" /> {exportProgressText || 'Mengunduh...'}
                 </>
               ) : (
@@ -652,375 +449,337 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
         <div
           ref={pagesContainerRef}
           id="printable-rekap-area"
-          className="dataku-print-container flex-1 overflow-y-auto p-4 sm:p-8 bg-slate-200/90 flex flex-col items-center gap-8 print:p-0 print:bg-white print:overflow-visible print:gap-0"
+          className="dataku-print-container flex-1 overflow-y-auto p-4 sm:p-8 bg-slate-200/90 flex flex-col items-center print:p-0 print:bg-white print:overflow-visible"
         >
-          {pagesData.map((page, index) => {
-            const pageNum = index + 1;
-            return (
-              <div
-                key={pageNum}
-                data-page-index={pageNum}
-                className={`dataku-print-page bg-white border border-slate-300 sm:border-2 sm:border-[#0F172A]/40 p-6 sm:p-10 text-slate-900 font-sans text-xs leading-relaxed shadow-xl print:shadow-none print:border-none print:p-6 print:w-full print:max-w-none ${
-                  paperDimensions.widthClass
-                } ${paperDimensions.minHeightClass} flex flex-col justify-between relative`}
-                style={{
-                  boxSizing: 'border-box'
-                }}
-              >
-                {/* On-Screen Subtle Page Header Indicator (Hidden when printing/exporting) */}
-                <div
-                  className="print:hidden absolute -top-3 left-4 bg-[#0F172A] text-white text-[9px] font-extrabold uppercase px-2 py-0.5 rounded shadow-neo-sm tracking-wider"
-                  data-html2canvas-ignore="true"
-                >
-                  Halaman {pageNum} dari {totalPageCount} ({paperSize} {effectiveOrientation})
+          <div
+            className={`dataku-print-sheet bg-white border border-slate-300 sm:border-2 sm:border-[#0F172A]/40 p-6 sm:p-10 text-slate-900 font-sans text-xs leading-relaxed shadow-xl print:shadow-none print:border-none print:p-0 print:w-full print:max-w-none ${paperDimensions.widthClass} relative flex flex-col justify-between`}
+            style={{ boxSizing: 'border-box' }}
+          >
+            <div className="space-y-4">
+              {/* Full Kop Surat */}
+              <div className="text-center space-y-1 border-b-4 border-double border-slate-900 pb-3 section-kop">
+                <div className="flex items-center justify-center gap-3">
+                  <div
+                    className="flex-shrink-0 flex items-center justify-center"
+                    style={{
+                      width: '48px',
+                      height: '48px',
+                      borderWidth: identityConfig?.logoOutlineEnabled !== false ? `${identityConfig?.logoOutlineWidth ?? 2}px` : '0px',
+                      borderStyle: identityConfig?.logoOutlineEnabled !== false && (identityConfig?.logoOutlineWidth ?? 2) > 0 ? 'solid' : 'none',
+                      borderColor: identityConfig?.logoOutlineEnabled !== false ? (identityConfig?.logoOutlineColor || '#0F172A') : 'transparent',
+                      borderRadius: identityConfig?.logoOutlineEnabled !== false ? `${identityConfig?.logoOutlineRadius ?? 12}px` : '0px',
+                      padding: identityConfig?.logoOutlineEnabled !== false ? `${identityConfig?.logoOutlinePadding ?? 4}px` : '0px',
+                      backgroundColor: identityConfig?.logoOutlineEnabled !== false ? '#FFFFFF' : 'transparent',
+                    }}
+                  >
+                    <img
+                      src={identityConfig?.logoUrl || '/LOGO.png'}
+                      alt={identityConfig?.appName || 'DATAKU'}
+                      className="w-full h-full object-contain"
+                      crossOrigin="anonymous"
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+                  <div className="text-left">
+                    <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 leading-none">
+                      {identityConfig?.appName || 'DATAKU'}
+                    </h1>
+                    <p className="text-[9px] font-extrabold text-slate-700 tracking-wider uppercase mt-0.5">
+                      {identityConfig?.tagline || 'SISTEM MANDOR'}
+                    </p>
+                  </div>
                 </div>
+                <h2 className="text-sm sm:text-base font-extrabold uppercase tracking-widest text-slate-800 mt-2">
+                  REKAP KEUANGAN &amp; LAPORAN PROYEK
+                </h2>
+                <p className="text-[10px] text-slate-500 uppercase tracking-wide">
+                  Sistem Manajemen Mandor Lapangan Terpadu
+                </p>
+              </div>
 
-                {/* Content Block of Page */}
-                <div className="space-y-4">
-                  {/* Page 1: Full Kop Surat */}
-                  {page.showKop && (
-                    <div className="text-center space-y-1 border-b-4 border-double border-slate-900 pb-3">
-                      <div className="flex items-center justify-center gap-3">
-                        <div
-                          className="flex-shrink-0 flex items-center justify-center"
-                          style={{
-                            width: '48px',
-                            height: '48px',
-                            borderWidth: identityConfig?.logoOutlineEnabled !== false ? `${identityConfig?.logoOutlineWidth ?? 2}px` : '0px',
-                            borderStyle: identityConfig?.logoOutlineEnabled !== false && (identityConfig?.logoOutlineWidth ?? 2) > 0 ? 'solid' : 'none',
-                            borderColor: identityConfig?.logoOutlineEnabled !== false ? (identityConfig?.logoOutlineColor || '#0F172A') : 'transparent',
-                            borderRadius: identityConfig?.logoOutlineEnabled !== false ? `${identityConfig?.logoOutlineRadius ?? 12}px` : '0px',
-                            padding: identityConfig?.logoOutlineEnabled !== false ? `${identityConfig?.logoOutlinePadding ?? 4}px` : '0px',
-                            backgroundColor: identityConfig?.logoOutlineEnabled !== false ? '#FFFFFF' : 'transparent',
-                          }}
-                        >
-                          <img
-                            src={identityConfig?.logoUrl || '/LOGO.png'}
-                            alt={identityConfig?.appName || 'DATAKU'}
-                            className="w-full h-full object-contain"
-                            crossOrigin="anonymous"
-                            referrerPolicy="no-referrer"
-                          />
-                        </div>
-                        <div className="text-left">
-                          <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 leading-none">
-                            {identityConfig?.appName || 'DATAKU'}
-                          </h1>
-                          <p className="text-[9px] font-extrabold text-slate-700 tracking-wider uppercase mt-0.5">
-                            {identityConfig?.tagline || 'SISTEM MANDOR'}
-                          </p>
-                        </div>
-                      </div>
-                      <h2 className="text-sm sm:text-base font-extrabold uppercase tracking-widest text-slate-800">
-                        REKAP KEUANGAN &amp; LAPORAN PROYEK
-                      </h2>
-                      <p className="text-[10px] text-slate-500 uppercase tracking-wide">
-                        Sistem Manajemen Mandor Lapangan Terpadu
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Page 2+: Compact Header for continuation */}
-                  {!page.showKop && (
-                    <div className="flex justify-between items-center border-b-2 border-slate-800 pb-2 text-[10px] text-slate-600 font-bold uppercase">
-                      <span>{identityConfig?.appName || 'DATAKU'} • {reportData.project.name}</span>
-                      <span>
-                        Lanjutan Rekap ({pageNum}/{totalPageCount})
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Metadata Block (Page 1 only) */}
-                  {page.showKop && (
-                    <div className="grid grid-cols-2 gap-4 py-3 border-b border-slate-300 text-[11px] font-medium">
-                      <div className="space-y-1">
-                        <p>
-                          <span className="text-slate-500 font-bold uppercase">Proyek:</span>{' '}
-                          <strong className="text-slate-900 uppercase">{reportData.project.name}</strong>
-                        </p>
-                        <p>
-                          <span className="text-slate-500 font-bold uppercase">Lokasi:</span>{' '}
-                          {reportData.project.location}
-                        </p>
-                        <p>
-                          <span className="text-slate-500 font-bold uppercase">Pemilik Proyek:</span>{' '}
-                          {reportData.project.owner}
-                        </p>
-                        <p>
-                          <span className="text-slate-500 font-bold uppercase">Anggaran Proyek:</span>{' '}
-                          {formatRupiah(reportData.project.budget)}
-                        </p>
-                      </div>
-                      <div className="space-y-1 text-right">
-                        <p>
-                          <span className="text-slate-500 font-bold uppercase">Periode:</span>{' '}
-                          <strong className="text-slate-900 uppercase">{reportData.period.label}</strong>
-                        </p>
-                        <p>
-                          <span className="text-slate-500 font-bold uppercase">Mandor Lapangan:</span>{' '}
-                          {reportData.project.mandorName}
-                        </p>
-                        <p>
-                          <span className="text-slate-500 font-bold uppercase">Waktu Cetak:</span>{' '}
-                          {reportData.printDate}
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* SECTION I: RINGKASAN REKAPITULASI (Page 1) */}
-                  {page.showRingkasan && (
-                    <div className="my-3">
-                      <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 border-b-2 border-slate-900 pb-1 mb-2">
-                        I. RINGKASAN REKAPITULASI
-                      </h3>
-                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 bg-slate-50 border border-slate-300 rounded p-2.5 text-[11px]">
-                        <div className="border-r border-slate-200 pr-2">
-                          <span className="text-slate-500 text-[9px] font-bold uppercase block">Dana Masuk</span>
-                          <span className="font-extrabold text-emerald-700 text-sm block mt-0.5">
-                            {formatRupiah(reportData.ringkasan.danaMasuk)}
-                          </span>
-                        </div>
-                        <div className="border-r border-slate-200 pr-2">
-                          <span className="text-slate-500 text-[9px] font-bold uppercase block">Pengeluaran</span>
-                          <span className="font-extrabold text-red-600 text-sm block mt-0.5">
-                            {formatRupiah(reportData.ringkasan.pengeluaran)}
-                          </span>
-                        </div>
-                        <div className="border-r border-slate-200 pr-2">
-                          <span className="text-slate-500 text-[9px] font-bold uppercase block">Upah Tukang</span>
-                          <span className="font-extrabold text-amber-700 text-sm block mt-0.5">
-                            {formatRupiah(reportData.ringkasan.upahTukang)}
-                          </span>
-                        </div>
-                        <div className="border-r border-slate-200 pr-2">
-                          <span className="text-slate-500 text-[9px] font-bold uppercase block">Bahan/Material</span>
-                          <span className="font-extrabold text-blue-700 text-sm block mt-0.5">
-                            {formatRupiah(reportData.ringkasan.pembelianMaterial)}
-                          </span>
-                        </div>
-                        <div className="pl-1">
-                          <span className="text-slate-500 text-[9px] font-bold uppercase block">Sisa Kas</span>
-                          <span
-                            className={`font-black text-sm block mt-0.5 ${
-                              reportData.ringkasan.saldoKas >= 0 ? 'text-emerald-800' : 'text-red-700'
-                            }`}
-                          >
-                            {formatRupiah(reportData.ringkasan.saldoKas)}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Expense Categories Breakdown */}
-                      {categoriesList.length > 0 && (
-                        <div className="mt-2 p-2 bg-white border border-slate-200 rounded">
-                          <p className="text-[10px] font-black uppercase text-slate-700 mb-1.5">
-                            RINCIAN PERSENTASE PENGELUARAN BERDASARKAN KATEGORI:
-                          </p>
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px]">
-                            {categoriesList.map((cat, idx) => (
-                              <div key={idx} className="flex justify-between items-center bg-slate-50 p-1 px-2 rounded border border-slate-200">
-                                <span className="font-bold text-slate-800 truncate">{cat.name}</span>
-                                <span className="font-black text-slate-900 ml-1">{cat.percentage}%</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* SECTION II: DAFTAR MUTASI DANA */}
-                  {page.showMutasiHeader && (
-                    <div className="my-3">
-                      <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 border-b-2 border-slate-900 pb-1 mb-2">
-                        II. DAFTAR MUTASI DANA {pageNum > 1 ? '(Lanjutan)' : ''}
-                      </h3>
-                      <table className="w-full text-left text-[10px] border-collapse border border-slate-300">
-                        <thead>
-                          <tr className="bg-slate-100 text-slate-800 font-bold uppercase">
-                            <th className="p-1.5 border border-slate-300 w-8 text-center">No</th>
-                            <th className="p-1.5 border border-slate-300">Tanggal &amp; Waktu</th>
-                            <th className="p-1.5 border border-slate-300">Tipe / Kategori</th>
-                            <th className="p-1.5 border border-slate-300">Keterangan / Deskripsi</th>
-                            <th className="p-1.5 border border-slate-300 text-right">Jumlah (Rp)</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {page.mutasiSlice.map((tx, idx) => (
-                            <tr key={tx.id || idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
-                              <td className="p-1.5 border border-slate-300 text-center text-slate-500 font-medium">{idx + 1}</td>
-                              <td className="p-1.5 border border-slate-300 whitespace-nowrap font-medium">
-                                {formatTanggalWaktu(tx.date)}
-                              </td>
-                              <td className="p-1.5 border border-slate-300">
-                                <span
-                                  className={`inline-block px-1.5 py-0.5 text-[9px] font-extrabold rounded uppercase ${
-                                    tx.type === 'DANA_MASUK' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
-                                  }`}
-                                >
-                                  {tx.category}
-                                </span>
-                              </td>
-                              <td className="p-1.5 border border-slate-300 text-slate-700">
-                                {tx.notes || '-'}
-                              </td>
-                              <td
-                                className={`p-1.5 border border-slate-300 text-right font-bold whitespace-nowrap ${
-                                  tx.type === 'DANA_MASUK' ? 'text-emerald-700' : 'text-red-600'
-                                }`}
-                              >
-                                {tx.type === 'DANA_MASUK' ? '+' : '-'}{formatRupiah(tx.amount)}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-
-                  {/* SECTION III: REKAP UPAH */}
-                  {page.showUpahHeader && page.upahSlice.length > 0 && (
-                    <div className="my-3">
-                      <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 border-b-2 border-slate-900 pb-1 mb-2">
-                        III. REKAP UPAH TUKANG &amp; PEKERJA ({page.upahSlice.length} Orang)
-                      </h3>
-                      <table className="w-full text-left text-[10px] border-collapse border border-slate-300">
-                        <thead>
-                          <tr className="bg-slate-100 text-slate-800 font-bold uppercase">
-                            <th className="p-1.5 border border-slate-300">Nama Pekerja</th>
-                            <th className="p-1.5 border border-slate-300 text-center">Jabatan</th>
-                            <th className="p-1.5 border border-slate-300 text-right">Hari Kerja</th>
-                            <th className="p-1.5 border border-slate-300 text-right">Upah / Hari</th>
-                            <th className="p-1.5 border border-slate-300 text-right font-black">Total Upah</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {page.upahSlice.map((w, idx) => (
-                            <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
-                              <td className="p-1.5 border border-slate-300 font-bold uppercase">{w.name}</td>
-                              <td className="p-1.5 border border-slate-300 text-center">{w.position}</td>
-                              <td className="p-1.5 border border-slate-300 text-right">{w.daysWorked} Hari</td>
-                              <td className="p-1.5 border border-slate-300 text-right">{formatRupiah(w.dailyRate)}</td>
-                              <td className="p-1.5 border border-slate-300 text-right font-black text-slate-900">
-                                {formatRupiah(w.totalWages)}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-
-                  {/* SECTION IV: RINGKASAN MATERIAL */}
-                  {page.showMaterialHeader && page.materialSlice.length > 0 && (
-                    <div className="my-3">
-                      <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 border-b-2 border-slate-900 pb-1 mb-2">
-                        IV. RINGKASAN MATERIAL ({page.materialSlice.length} Item)
-                      </h3>
-                      <table className="w-full text-left text-[10px] border-collapse border border-slate-300">
-                        <thead>
-                          <tr className="bg-slate-100 text-slate-800 font-bold uppercase">
-                            <th className="p-1.5 border border-slate-300">Nama Material</th>
-                            <th className="p-1.5 border border-slate-300 text-center">Satuan</th>
-                            <th className="p-1.5 border border-slate-300 text-right">Masuk</th>
-                            <th className="p-1.5 border border-slate-300 text-right">Keluar</th>
-                            <th className="p-1.5 border border-slate-300 text-right">Terpakai</th>
-                            <th className="p-1.5 border border-slate-300 text-right font-black">Sisa Stok</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {page.materialSlice.map((m, idx) => (
-                            <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
-                              <td className="p-1.5 border border-slate-300 font-bold uppercase">{m.materialName}</td>
-                              <td className="p-1.5 border border-slate-300 text-center">{m.unit}</td>
-                              <td className="p-1.5 border border-slate-300 text-right text-emerald-700 font-semibold">
-                                {m.masuk > 0 ? `+${m.masuk}` : '0'}
-                              </td>
-                              <td className="p-1.5 border border-slate-300 text-right text-amber-700 font-semibold">
-                                {m.keluar > 0 ? `-${m.keluar}` : '0'}
-                              </td>
-                              <td className="p-1.5 border border-slate-300 text-right text-red-600 font-semibold">
-                                {m.terpakai > 0 ? `-${m.terpakai}` : '0'}
-                              </td>
-                              <td className="p-1.5 border border-slate-300 text-right font-black text-slate-900">
-                                {m.sisaStok}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-
-                  {/* SECTION V: LAPORAN HARIAN */}
-                  {page.showLaporanHeader && page.laporanSlice.length > 0 && (
-                    <div className="my-3">
-                      <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 border-b-2 border-slate-900 pb-1 mb-2">
-                        V. LAPORAN HARIAN ({page.laporanSlice.length} Hari)
-                      </h3>
-                      <table className="w-full text-left text-[10px] border-collapse border border-slate-300">
-                        <thead>
-                          <tr className="bg-slate-100 text-slate-800 font-bold uppercase">
-                            <th className="p-1.5 border border-slate-300">Tanggal</th>
-                            <th className="p-1.5 border border-slate-300">Cuaca</th>
-                            <th className="p-1.5 border border-slate-300 text-center">Pekerja</th>
-                            <th className="p-1.5 border border-slate-300">Pekerjaan Lapangan</th>
-                            <th className="p-1.5 border border-slate-300">Kendala</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {page.laporanSlice.map((r, idx) => (
-                            <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
-                              <td className="p-1.5 border border-slate-300 whitespace-nowrap font-bold">
-                                {formatTanggal(r.date)}
-                              </td>
-                              <td className="p-1.5 border border-slate-300">{r.weather}</td>
-                              <td className="p-1.5 border border-slate-300 text-center font-bold">
-                                {r.workerCount} Org
-                              </td>
-                              <td className="p-1.5 border border-slate-300 font-medium">{r.todayWork}</td>
-                              <td className="p-1.5 border border-slate-300 italic text-slate-600">
-                                {r.challenges || '-'}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-
-                  {/* Tanda Tangan Mandor & Pengawas */}
-                  {page.showSignature && (
-                    <div className="mt-8 pt-4 grid grid-cols-2 gap-8 text-center text-xs font-bold break-inside-avoid">
-                      <div>
-                        <p className="mb-14 text-slate-700">Mandor Proyek,</p>
-                        <p className="underline uppercase tracking-wide text-slate-900 font-black">
-                          {reportData.project.mandorName}
-                        </p>
-                        <p className="text-[10px] text-slate-500 uppercase mt-0.5">DATAKU MANDOR SYSTEM</p>
-                      </div>
-                      <div>
-                        <p className="mb-14 text-slate-700">Pengawas / Pemilik,</p>
-                        <p className="underline uppercase tracking-wide text-slate-900 font-black">
-                          ( {reportData.project.owner} )
-                        </p>
-                        <p className="text-[10px] text-slate-500 uppercase mt-0.5">PERWAKILAN OWNER</p>
-                      </div>
-                    </div>
-                  )}
+              {/* Metadata Grid */}
+              <div className="grid grid-cols-2 gap-4 py-2.5 border-b border-slate-300 text-[11px] font-medium keep-together">
+                <div className="space-y-1">
+                  <p>
+                    <span className="text-slate-500 font-bold uppercase">Proyek:</span>{' '}
+                    <strong className="text-slate-900 uppercase">{reportData.project.name}</strong>
+                  </p>
+                  <p>
+                    <span className="text-slate-500 font-bold uppercase">Lokasi:</span>{' '}
+                    {reportData.project.location || '-'}
+                  </p>
+                  <p>
+                    <span className="text-slate-500 font-bold uppercase">Pemilik Proyek:</span>{' '}
+                    {reportData.project.owner || '-'}
+                  </p>
+                  <p>
+                    <span className="text-slate-500 font-bold uppercase">Anggaran Proyek:</span>{' '}
+                    {formatRupiah(reportData.project.budget)}
+                  </p>
                 </div>
-
-                {/* Page Footer */}
-                <div className="mt-auto pt-3 border-t border-slate-300 flex justify-between items-center text-[9px] text-slate-400 uppercase tracking-wider dataku-print-footer">
-                  <span>Dicetak melalui aplikasi DATAKU Mandor • {reportData.printDate}</span>
-                  <span className="font-black text-slate-600">
-                    Halaman {pageNum} dari {totalPageCount}
-                  </span>
+                <div className="space-y-1 text-right">
+                  <p>
+                    <span className="text-slate-500 font-bold uppercase">Periode:</span>{' '}
+                    <strong className="text-slate-900 uppercase">{reportData.period.label}</strong>
+                  </p>
+                  <p>
+                    <span className="text-slate-500 font-bold uppercase">Mandor Lapangan:</span>{' '}
+                    {reportData.project.mandorName || '-'}
+                  </p>
+                  <p>
+                    <span className="text-slate-500 font-bold uppercase">Waktu Cetak:</span>{' '}
+                    {reportData.printDate}
+                  </p>
                 </div>
               </div>
-            );
-          })}
+
+              {/* SECTION I: RINGKASAN REKAPITULASI */}
+              <div className="my-3 keep-together">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 border-b-2 border-slate-900 pb-1 mb-2">
+                  I. RINGKASAN REKAPITULASI
+                </h3>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 bg-slate-50 border border-slate-300 rounded p-2.5 text-[11px]">
+                  <div className="border-r border-slate-200 pr-2">
+                    <span className="text-slate-500 text-[9px] font-bold uppercase block">Dana Masuk</span>
+                    <span className="font-extrabold text-emerald-700 text-sm block mt-0.5">
+                      {formatRupiah(reportData.ringkasan.danaMasuk)}
+                    </span>
+                  </div>
+                  <div className="border-r border-slate-200 pr-2">
+                    <span className="text-slate-500 text-[9px] font-bold uppercase block">Pengeluaran</span>
+                    <span className="font-extrabold text-red-600 text-sm block mt-0.5">
+                      {formatRupiah(reportData.ringkasan.pengeluaran)}
+                    </span>
+                  </div>
+                  <div className="border-r border-slate-200 pr-2">
+                    <span className="text-slate-500 text-[9px] font-bold uppercase block">Upah Tukang</span>
+                    <span className="font-extrabold text-amber-700 text-sm block mt-0.5">
+                      {formatRupiah(reportData.ringkasan.upahTukang)}
+                    </span>
+                  </div>
+                  <div className="border-r border-slate-200 pr-2">
+                    <span className="text-slate-500 text-[9px] font-bold uppercase block">Bahan/Material</span>
+                    <span className="font-extrabold text-blue-700 text-sm block mt-0.5">
+                      {formatRupiah(reportData.ringkasan.pembelianMaterial)}
+                    </span>
+                  </div>
+                  <div className="pl-1">
+                    <span className="text-slate-500 text-[9px] font-bold uppercase block">Sisa Kas</span>
+                    <span
+                      className={`font-black text-sm block mt-0.5 ${
+                        reportData.ringkasan.saldoKas >= 0 ? 'text-emerald-800' : 'text-red-700'
+                      }`}
+                    >
+                      {formatRupiah(reportData.ringkasan.saldoKas)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Expense Categories Breakdown */}
+                {categoriesList.length > 0 && (
+                  <div className="mt-2 p-2 bg-white border border-slate-200 rounded">
+                    <p className="text-[10px] font-black uppercase text-slate-700 mb-1.5">
+                      RINCIAN PERSENTASE PENGELUARAN BERDASARKAN KATEGORI:
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px]">
+                      {categoriesList.map((cat, idx) => (
+                        <div key={idx} className="flex justify-between items-center bg-slate-50 p-1 px-2 rounded border border-slate-200">
+                          <span className="font-bold text-slate-800 truncate">{cat.name}</span>
+                          <span className="font-black text-slate-900 ml-1">{cat.percentage}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* SECTION II: DAFTAR MUTASI DANA */}
+              {reportData.mutasiDana && reportData.mutasiDana.length > 0 && (
+                <div className="my-3 section-block">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 border-b-2 border-slate-900 pb-1 mb-2">
+                    II. DAFTAR MUTASI DANA ({reportData.mutasiDana.length} Transaksi)
+                  </h3>
+                  <table className="w-full text-left text-[10px] border-collapse border border-slate-300">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-800 font-bold uppercase print-header-row">
+                        <th className="p-1.5 border border-slate-300 w-8 text-center">No</th>
+                        <th className="p-1.5 border border-slate-300 w-32">Tanggal &amp; Waktu</th>
+                        <th className="p-1.5 border border-slate-300 w-28">Tipe / Kategori</th>
+                        <th className="p-1.5 border border-slate-300">Keterangan / Deskripsi</th>
+                        <th className="p-1.5 border border-slate-300 text-right w-28">Jumlah (Rp)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reportData.mutasiDana.map((tx, idx) => (
+                        <tr key={tx.id || idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
+                          <td className="p-1.5 border border-slate-300 text-center text-slate-500 font-medium">{idx + 1}</td>
+                          <td className="p-1.5 border border-slate-300 whitespace-nowrap font-medium">
+                            {formatTanggalWaktu(tx.date)}
+                          </td>
+                          <td className="p-1.5 border border-slate-300">
+                            <span
+                              className={`inline-block px-1.5 py-0.5 text-[9px] font-extrabold rounded uppercase ${
+                                tx.type === 'DANA_MASUK' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
+                              }`}
+                            >
+                              {tx.category}
+                            </span>
+                          </td>
+                          <td className="p-1.5 border border-slate-300 text-slate-700">
+                            {tx.notes || '-'}
+                          </td>
+                          <td
+                            className={`p-1.5 border border-slate-300 text-right font-bold whitespace-nowrap ${
+                              tx.type === 'DANA_MASUK' ? 'text-emerald-700' : 'text-red-600'
+                            }`}
+                          >
+                            {tx.type === 'DANA_MASUK' ? '+' : '-'}{formatRupiah(tx.amount)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* SECTION III: REKAP UPAH TUKANG */}
+              {reportData.rekapUpah && reportData.rekapUpah.length > 0 && (
+                <div className="my-3 section-block">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 border-b-2 border-slate-900 pb-1 mb-2">
+                    III. REKAP UPAH TUKANG &amp; PEKERJA ({reportData.rekapUpah.length} Orang)
+                  </h3>
+                  <table className="w-full text-left text-[10px] border-collapse border border-slate-300">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-800 font-bold uppercase print-header-row">
+                        <th className="p-1.5 border border-slate-300">Nama Pekerja</th>
+                        <th className="p-1.5 border border-slate-300 text-center">Jabatan</th>
+                        <th className="p-1.5 border border-slate-300 text-right">Hari Kerja</th>
+                        <th className="p-1.5 border border-slate-300 text-right">Upah / Hari</th>
+                        <th className="p-1.5 border border-slate-300 text-right font-black">Total Upah</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reportData.rekapUpah.map((w, idx) => (
+                        <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
+                          <td className="p-1.5 border border-slate-300 font-bold uppercase">{w.name}</td>
+                          <td className="p-1.5 border border-slate-300 text-center">{w.position}</td>
+                          <td className="p-1.5 border border-slate-300 text-right">{w.daysWorked} Hari</td>
+                          <td className="p-1.5 border border-slate-300 text-right">{formatRupiah(w.dailyRate)}</td>
+                          <td className="p-1.5 border border-slate-300 text-right font-black text-slate-900">
+                            {formatRupiah(w.totalWages)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* SECTION IV: RINGKASAN MATERIAL */}
+              {reportData.ringkasanMaterial && reportData.ringkasanMaterial.length > 0 && (
+                <div className="my-3 section-block">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 border-b-2 border-slate-900 pb-1 mb-2">
+                    IV. RINGKASAN MATERIAL ({reportData.ringkasanMaterial.length} Item)
+                  </h3>
+                  <table className="w-full text-left text-[10px] border-collapse border border-slate-300">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-800 font-bold uppercase print-header-row">
+                        <th className="p-1.5 border border-slate-300">Nama Material</th>
+                        <th className="p-1.5 border border-slate-300 text-center">Satuan</th>
+                        <th className="p-1.5 border border-slate-300 text-right">Masuk</th>
+                        <th className="p-1.5 border border-slate-300 text-right">Keluar</th>
+                        <th className="p-1.5 border border-slate-300 text-right">Terpakai</th>
+                        <th className="p-1.5 border border-slate-300 text-right font-black">Sisa Stok</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reportData.ringkasanMaterial.map((m, idx) => (
+                        <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
+                          <td className="p-1.5 border border-slate-300 font-bold uppercase">{m.materialName}</td>
+                          <td className="p-1.5 border border-slate-300 text-center">{m.unit}</td>
+                          <td className="p-1.5 border border-slate-300 text-right text-emerald-700 font-semibold">
+                            {m.masuk > 0 ? `+${m.masuk}` : '0'}
+                          </td>
+                          <td className="p-1.5 border border-slate-300 text-right text-amber-700 font-semibold">
+                            {m.keluar > 0 ? `-${m.keluar}` : '0'}
+                          </td>
+                          <td className="p-1.5 border border-slate-300 text-right text-red-600 font-semibold">
+                            {m.terpakai > 0 ? `-${m.terpakai}` : '0'}
+                          </td>
+                          <td className="p-1.5 border border-slate-300 text-right font-black text-slate-900">
+                            {m.sisaStok}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* SECTION V: LAPORAN HARIAN */}
+              {reportData.laporanHarian && reportData.laporanHarian.length > 0 && (
+                <div className="my-3 section-block">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 border-b-2 border-slate-900 pb-1 mb-2">
+                    V. LAPORAN HARIAN ({reportData.laporanHarian.length} Hari)
+                  </h3>
+                  <table className="w-full text-left text-[10px] border-collapse border border-slate-300">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-800 font-bold uppercase print-header-row">
+                        <th className="p-1.5 border border-slate-300">Tanggal</th>
+                        <th className="p-1.5 border border-slate-300">Cuaca</th>
+                        <th className="p-1.5 border border-slate-300 text-center">Pekerja</th>
+                        <th className="p-1.5 border border-slate-300">Pekerjaan Lapangan</th>
+                        <th className="p-1.5 border border-slate-300">Kendala</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reportData.laporanHarian.map((r, idx) => (
+                        <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}>
+                          <td className="p-1.5 border border-slate-300 whitespace-nowrap font-bold">
+                            {formatTanggal(r.date)}
+                          </td>
+                          <td className="p-1.5 border border-slate-300">{r.weather}</td>
+                          <td className="p-1.5 border border-slate-300 text-center font-bold">
+                            {r.workerCount} Org
+                          </td>
+                          <td className="p-1.5 border border-slate-300 font-medium">{r.todayWork}</td>
+                          <td className="p-1.5 border border-slate-300 italic text-slate-600">
+                            {r.challenges || '-'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Tanda Tangan Mandor & Pengawas */}
+              <div className="mt-8 pt-4 grid grid-cols-2 gap-8 text-center text-xs font-bold keep-together">
+                <div>
+                  <p className="mb-14 text-slate-700">Mandor Proyek,</p>
+                  <p className="underline uppercase tracking-wide text-slate-900 font-black">
+                    {reportData.project.mandorName || 'Mandor'}
+                  </p>
+                  <p className="text-[10px] text-slate-500 uppercase mt-0.5">DATAKU MANDOR SYSTEM</p>
+                </div>
+                <div>
+                  <p className="mb-14 text-slate-700">Pengawas / Pemilik,</p>
+                  <p className="underline uppercase tracking-wide text-slate-900 font-black">
+                    ( {reportData.project.owner || 'Owner'} )
+                  </p>
+                  <p className="text-[10px] text-slate-500 uppercase mt-0.5">PERWAKILAN OWNER</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Page Footer */}
+            <div className="mt-8 pt-3 border-t border-slate-300 flex justify-between items-center text-[9px] text-slate-400 uppercase tracking-wider dataku-print-footer keep-together">
+              <span>Dicetak melalui aplikasi DATAKU Mandor • {reportData.printDate}</span>
+              <span className="font-black text-slate-600">
+                Dokumen Laporan Resmi DATAKU
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1036,7 +795,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
               ? '215mm 330mm portrait'
               : '330mm 215mm landscape'
           };
-          margin: 8mm;
+          margin: 10mm;
         }
         @media print {
           html, body {
@@ -1051,9 +810,7 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
             visibility: hidden !important;
           }
           #printable-rekap-area,
-          #printable-rekap-area *,
-          .dataku-print-page,
-          .dataku-print-page * {
+          #printable-rekap-area * {
             visibility: visible !important;
           }
           #printable-rekap-area {
@@ -1065,36 +822,45 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
             padding: 0 !important;
             border: none !important;
             background: #ffffff !important;
+            box-shadow: none !important;
             z-index: 999999 !important;
           }
-          .dataku-print-page {
+          .dataku-print-sheet {
             position: relative !important;
             top: auto !important;
             left: auto !important;
             width: 100% !important;
             max-width: 100% !important;
             margin: 0 !important;
-            padding: 6mm 8mm !important;
+            padding: 0 !important;
             border: none !important;
             box-shadow: none !important;
             background: #ffffff !important;
             color: #000000 !important;
-            page-break-after: always !important;
-            break-after: page !important;
-            page-break-inside: avoid !important;
-            break-inside: avoid !important;
+            min-height: auto !important;
+            height: auto !important;
             box-sizing: border-box !important;
           }
-          .dataku-print-page:last-child {
-            page-break-after: auto !important;
-            break-after: auto !important;
+          table {
+            width: 100% !important;
+            border-collapse: collapse !important;
+            page-break-inside: auto !important;
+            break-inside: auto !important;
+          }
+          thead {
+            display: table-header-group !important;
           }
           tr {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
           }
-          thead {
-            display: table-header-group !important;
+          .keep-together {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+          .section-block {
+            page-break-inside: auto !important;
+            break-inside: auto !important;
           }
           nav, aside, header, button, .no-print {
             display: none !important;
